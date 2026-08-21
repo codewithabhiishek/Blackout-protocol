@@ -1,1 +1,142 @@
 @import "tailwindcss";
+
+@theme {
+  --font-display: "Black Ops One", "Impact", sans-serif;
+  --font-body: "Rajdhani", "Trebuchet MS", sans-serif;
+  --color-ink: #04070a;
+  --color-pit: #070c09;
+  --color-panel: #0b120d;
+  --color-brass: #ffb02e;
+  --color-brassdim: #8a6a24;
+  --color-blood: #ff3b30;
+  --color-acid: #b8e63c;
+  --color-ghost: #93a89a;
+  --color-line: #24322a;
+}
+
+html,
+body {
+  overflow: hidden;
+  font-family: var(--font-body);
+  background: var(--color-ink);
+  color: #e8efe9;
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: #ffb02e;
+  color: #04070a;
+}
+
+/* ---------- shapes ---------- */
+.chamfer {
+  clip-path: polygon(14px 0, 100% 0, 100% calc(100% - 14px), calc(100% - 14px) 100%, 0 100%, 0 14px);
+}
+.chamfer-sm {
+  clip-path: polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px);
+}
+.chamfer-r {
+  clip-path: polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 14px 100%, 0 calc(100% - 14px));
+}
+
+.scanlines::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    to bottom,
+    rgba(255, 255, 255, 0.022) 0px,
+    rgba(255, 255, 255, 0.022) 1px,
+    rgba(0, 0, 0, 0) 2px,
+    rgba(0, 0, 0, 0) 4px
+  );
+  mix-blend-mode: overlay;
+}
+
+.kbd {
+  font-family: var(--font-body);
+  font-weight: 700;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  color: #ffb02e;
+  border: 1px solid rgba(255, 176, 46, 0.45);
+  border-bottom-width: 3px;
+  background: rgba(255, 176, 46, 0.07);
+  padding: 2px 8px;
+  min-width: 26px;
+  text-align: center;
+  display: inline-block;
+}
+
+.stencil-outline {
+  color: transparent;
+  -webkit-text-stroke: 2px #ffb02e;
+}
+
+/* ---------- animation ---------- */
+@keyframes bannerIn {
+  0% { opacity: 0; transform: scale(1.6); letter-spacing: 0.6em; filter: blur(6px); }
+  18% { opacity: 1; transform: scale(1); filter: blur(0); }
+  80% { opacity: 1; }
+  100% { opacity: 0; transform: scale(0.94); }
+}
+.anim-banner { animation: bannerIn 2.6s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+
+@keyframes bannerSub {
+  0% { opacity: 0; transform: translateY(14px); }
+  25% { opacity: 1; transform: translateY(0); }
+  80% { opacity: 1; }
+  100% { opacity: 0; }
+}
+.anim-banner-sub { animation: bannerSub 2.6s ease forwards; }
+
+@keyframes feedIn {
+  0% { opacity: 0; transform: translateX(-18px); }
+  10% { opacity: 1; transform: translateX(0); }
+  82% { opacity: 1; }
+  100% { opacity: 0; transform: translateX(6px); }
+}
+.anim-feed { animation: feedIn 3s ease forwards; }
+
+@keyframes hintFade {
+  0%, 70% { opacity: 0.85; }
+  100% { opacity: 0; visibility: hidden; }
+}
+.anim-hint { animation: hintFade 9s ease forwards; }
+
+@keyframes blinkHard {
+  0%, 49% { opacity: 1; }
+  50%, 100% { opacity: 0.15; }
+}
+.anim-blink { animation: blinkHard 0.8s steps(1) infinite; }
+
+@keyframes tickerMove {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+.anim-ticker { animation: tickerMove 22s linear infinite; }
+
+@keyframes pulseRed {
+  0%, 100% { opacity: 0.25; }
+  50% { opacity: 0.7; }
+}
+.anim-pulse-red { animation: pulseRed 1s ease-in-out infinite; }
+
+@keyframes riseIn {
+  0% { opacity: 0; transform: translateY(22px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+.anim-rise { animation: riseIn 0.55s cubic-bezier(0.16, 1, 0.3, 1) both; }
+.anim-rise-1 { animation-delay: 0.06s; }
+.anim-rise-2 { animation-delay: 0.14s; }
+.anim-rise-3 { animation-delay: 0.22s; }
+.anim-rise-4 { animation-delay: 0.3s; }
+
+@keyframes sweepRot {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+.anim-sweep { animation: sweepRot 4s linear infinite; }
+
+button { cursor: pointer; }
