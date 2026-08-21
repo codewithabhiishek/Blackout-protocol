@@ -227,7 +227,7 @@ export default function App() {
 
   const resume = useCallback(() => {
     sfx.ui();
-    gameRef.current?.requestLock();
+    gameRef.current?.resumeGame();
   }, []);
 
   const restart = useCallback(() => {
@@ -373,7 +373,7 @@ export default function App() {
           {/* controls hint */}
           {screen === "play" && (
             <div className="anim-hint absolute bottom-5 left-1/2 -translate-x-1/2 whitespace-nowrap text-[13px] font-semibold tracking-[0.22em] text-ghost">
-              WASD MOVE&ensp;·&ensp;MOUSE AIM&ensp;·&ensp;LMB FIRE&ensp;·&ensp;R RELOAD&ensp;·&ensp;SHIFT SPRINT&ensp;·&ensp;P PAUSE
+              WASD MOVE&ensp;·&ensp;HOLD MOUSE + MOVE TO AIM&ensp;·&ensp;LMB / RMB FIRE&ensp;·&ensp;R RELOAD&ensp;·&ensp;SHIFT SPRINT&ensp;·&ensp;P PAUSE
             </div>
           )}
 
@@ -468,8 +468,8 @@ export default function App() {
                     ))}
                   </div>
                   <Ctrl k="W A S D" label="MOVE" />
-                  <Ctrl k="MOUSE" label="AIM / LOOK" />
-                  <Ctrl k="LMB" label="FIRE (HOLD)" />
+                  <Ctrl k="MOUSE" label="AIM — HOLD & MOVE" />
+                  <Ctrl k="LMB / RMB" label="FIRE (HOLD)" />
                   <Ctrl k="R" label="RELOAD" />
                   <Ctrl k="SHIFT" label="SPRINT" />
                   <Ctrl k="P / ESC" label="PAUSE" />

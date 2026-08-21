@@ -182,6 +182,10 @@ export class Game {
 
   private keys = new Set<string>();
   private mouseDown = false;
+  private mousePos = { x: -9999, y: -9999 };
+  private prevMouse = { x: 0, y: 0 };
+  private lastLockTry = 0;
+  private onCtx = (e: Event) => e.preventDefault();
 
   private dirX = 1; private dirY = 0;
   private planeX = 0; private planeY = 0.66;
@@ -228,6 +232,7 @@ export class Game {
     document.addEventListener("mouseup", this.onMouseUp);
     document.addEventListener("pointerlockchange", this.onPlc);
     window.addEventListener("blur", this.onBlur);
+    this.canvas.addEventListener("contextmenu", this.onCtx);
 
     this.last = performance.now();
     this.raf = requestAnimationFrame(this.tick);
@@ -243,6 +248,7 @@ export class Game {
     document.removeEventListener("mouseup", this.onMouseUp);
     document.removeEventListener("pointerlockchange", this.onPlc);
     window.removeEventListener("blur", this.onBlur);
+    this.canvas.removeEventListener("contextmenu", this.onCtx);
     sfx.stopAmbient();
     if (document.pointerLockElement === this.canvas) document.exitPointerLock();
   }
@@ -278,12 +284,25 @@ export class Game {
   }
 
   requestLock() {
+    /* rate-limited: sandboxed environments may reject pointer lock */
+    const now = performance.now();
+    if (now - this.lastLockTry < 900) return;
+    this.lastLockTry = now;
     try {
       const r = this.canvas.requestPointerLock() as unknown as Promise<void> | undefined;
       if (r && typeof r.catch === "function") r.catch(() => undefined);
     } catch {
       /* pointer lock unavailable */
     }
+  }
+
+  resumeGame() {
+    if (this.mode === "play" && this.paused && !this.dead) {
+      this.paused = false;
+      this.last = performance.now();
+      this.onEvent({ type: "resume" });
+    }
+    this.requestLock(); /* best effort — game is fully playable without it */
   }
 
   quitToMenu() {
@@ -337,8 +356,12 @@ export class Game {
     this.keys.add(e.code);
     if (e.code === "KeyR" && this.mode === "play" && !this.paused && !this.dead) this.startReload();
     if (e.code === "KeyP" && this.mode === "play" && !this.dead) {
-      if (this.locked) document.exitPointerLock();
-      else this.requestLock();
+      if (this.paused) this.resumeGame();
+      else if (this.locked) document.exitPointerLock();
+      else {
+        this.paused = true;
+        this.onEvent({ type: "pause" });
+      }
     }
     if (e.code === "KeyM") this.toggleMute();
   };
@@ -348,16 +371,35 @@ export class Game {
   };
 
   private onMouseMove = (e: MouseEvent) => {
-    if (!this.locked || this.mode !== "play" || this.paused || this.dead) return;
-    this.p.a += e.movementX * 0.0024;
-    this.pitch = clamp(this.pitch - e.movementY * 0.7, -this.H * 0.3, this.H * 0.3);
+    this.mousePos.x = e.clientX;
+    this.mousePos.y = e.clientY;
+    if (this.mode === "play" && !this.paused && !this.dead) {
+      if (this.locked) {
+        this.p.a += e.movementX * 0.0024;
+        this.pitch = clamp(this.pitch - e.movementY * 0.7, -this.H * 0.3, this.H * 0.3);
+      } else if (this.mouseDown) {
+        /* fallback drag-aim when pointer lock is unavailable */
+        const dx = e.clientX - this.prevMouse.x;
+        const dy = e.clientY - this.prevMouse.y;
+        this.p.a += dx * 0.0042;
+        this.pitch = clamp(this.pitch - dy * 0.85, -this.H * 0.3, this.H * 0.3);
+      }
+    }
+    this.prevMouse.x = e.clientX;
+    this.prevMouse.y = e.clientY;
   };
 
   private onMouseDown = (e: MouseEvent) => {
-    if (e.button === 0) this.mouseDown = true;
+    if (e.button === 0 || e.button === 2) {
+      e.preventDefault();
+      this.prevMouse.x = e.clientX;
+      this.prevMouse.y = e.clientY;
+      this.mouseDown = true;
+      if (this.mode === "play" && !this.locked && !this.paused && !this.dead) this.requestLock();
+    }
   };
   private onMouseUp = (e: MouseEvent) => {
-    if (e.button === 0) this.mouseDown = false;
+    if (e.button === 0 || e.button === 2) this.mouseDown = false;
   };
 
   private onPlc = () => {
@@ -520,6 +562,8 @@ export class Game {
     const dx = Math.cos(ang), dy = Math.sin(ang);
     const wallDist = this.castGrid(p.x, p.y, dx, dy, 40);
 
+    /* slightly generous hit detection when aiming without pointer lock */
+    const hitR = this.locked ? 0.36 : 0.46;
     let best: Enemy | null = null;
     let bestT = Infinity;
     for (const e of this.enemies) {
@@ -527,7 +571,7 @@ export class Game {
       const t = ex * dx + ey * dy;
       if (t > 0.3 && t < wallDist) {
         const perp = Math.abs(ex * dy - ey * dx);
-        if (perp < 0.36 && t < bestT) { best = e; bestT = t; }
+        if (perp < hitR && t < bestT) { best = e; bestT = t; }
       }
     }
 
@@ -775,9 +819,22 @@ export class Game {
       }
     }
 
-    /* firing */
+    /* edge-turn: keep rotating while holding the mouse near a screen edge
+       (only used when pointer lock is unavailable) */
+    if (!this.locked && this.mouseDown && this.mousePos.x >= 0) {
+      const edge = 90;
+      const vw = window.innerWidth, vh = window.innerHeight;
+      const cx = this.mousePos.x, cy = this.mousePos.y;
+      if (cx < edge) this.p.a -= dt * 3.4 * (1.25 - cx / edge);
+      else if (cx > vw - edge) this.p.a += dt * 3.4 * (1.25 - (vw - cx) / edge);
+      const pLim = this.H * 0.3;
+      if (cy < edge) this.pitch = clamp(this.pitch + dt * 260 * (1.2 - cy / edge), -pLim, pLim);
+      else if (cy > vh - edge) this.pitch = clamp(this.pitch - dt * 260 * (1.2 - (vh - cy) / edge), -pLim, pLim);
+    }
+
+    /* firing — works with or without pointer lock */
     this.fireT -= dt;
-    if (this.mouseDown && this.locked && !p.reloading) {
+    if (this.mouseDown && !p.reloading) {
       if (p.mag > 0) {
         if (this.fireT <= 0) this.fire();
       } else if (this.fireT <= 0) {
@@ -1183,17 +1240,17 @@ export class Game {
   private drawCrosshair(ctx: CanvasRenderingContext2D, W: number, H: number) {
     const cx = W / 2, cy = H / 2;
     const sprinting = this.keys.has("ShiftLeft") || this.keys.has("ShiftRight");
-    const gap = 7 + this.moveFactor() * 5 + this.recoil * 11 + (sprinting ? 5 : 0);
-    ctx.strokeStyle = "rgba(0,0,0,0.65)";
-    ctx.lineWidth = 3;
-    this.crossLines(ctx, cx, cy, gap, 8);
+    const gap = 8 + this.moveFactor() * 5 + this.recoil * 11 + (sprinting ? 5 : 0);
+    ctx.strokeStyle = "rgba(0,0,0,0.7)";
+    ctx.lineWidth = 3.4;
+    this.crossLines(ctx, cx, cy, gap, 10);
     ctx.stroke();
-    ctx.strokeStyle = "rgba(240,255,240,0.92)";
-    ctx.lineWidth = 1.4;
-    this.crossLines(ctx, cx, cy, gap, 8);
+    ctx.strokeStyle = "rgba(240,255,240,0.95)";
+    ctx.lineWidth = 1.6;
+    this.crossLines(ctx, cx, cy, gap, 10);
     ctx.stroke();
-    ctx.fillStyle = "rgba(240,255,240,0.9)";
-    ctx.fillRect(cx - 1, cy - 1, 2, 2);
+    ctx.fillStyle = "rgba(255,176,46,0.95)";
+    ctx.fillRect(cx - 1.2, cy - 1.2, 2.4, 2.4);
 
     if (this.hitMark.t > 0) {
       const a = clamp(this.hitMark.t / (this.hitMark.kill ? 0.2 : 0.16), 0, 1);
