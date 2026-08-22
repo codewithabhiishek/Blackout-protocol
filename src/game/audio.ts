@@ -160,6 +160,10 @@ class Sfx {
     this.tone(210, 58, 0.16, "square", 0.24);
     this.noise(0.12, 0.2, 700, 0.8);
   }
+  headshot() {
+    this.tone(1150, 1750, 0.09, "sine", 0.2);
+    this.tone(580, 880, 0.07, "square", 0.08, 0.02);
+  }
   ui() {
     this.tone(840, 620, 0.07, "square", 0.1);
   }

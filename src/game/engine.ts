@@ -28,6 +28,7 @@ export interface HudData {
   crouched: boolean;
   weapon: string;
   weaponIdx: number;
+  fireMode: string;
   muted: boolean;
 }
 
@@ -119,7 +120,7 @@ const ENEMY_BASE: Record<EnemyKind, { hp: number; speed: number; scale: number; 
 /* ---------------------------- weapons ---------------------------- */
 
 export interface WeaponDef {
-  name: string; short: string;
+  name: string; short: string; fireMode: string;
   mag: number; interval: number; auto: boolean;
   dmgLo: number; dmgHi: number; pellets: number;
   spread: number; recoil: number; shake: number; kick: number;
@@ -129,23 +130,26 @@ export interface WeaponDef {
 
 export const WEAPONS: WeaponDef[] = [
   {
-    name: "PHANTOM MK-IV", short: "RIFLE",
-    mag: 30, interval: 0.115, auto: true,
-    dmgLo: 26, dmgHi: 38, pellets: 1,
-    spread: 0.011, recoil: 1, shake: 2.1, kick: 3.2,
-    reload: 1.5, range: 40, flash: 1, sound: "rifle",
+    /* precise semi-auto marksman rifle — one deliberate shot per trigger pull */
+    name: "PHANTOM MK-IV", short: "RIFLE", fireMode: "SEMI-AUTO",
+    mag: 24, interval: 0.17, auto: false,
+    dmgLo: 34, dmgHi: 48, pellets: 1,
+    spread: 0.005, recoil: 1.25, shake: 2.4, kick: 4.2,
+    reload: 1.6, range: 40, flash: 1, sound: "rifle",
   },
   {
-    name: "SCORPION PDW", short: "SMG",
-    mag: 40, interval: 0.062, auto: true,
-    dmgLo: 13, dmgHi: 20, pellets: 1,
-    spread: 0.021, recoil: 0.5, shake: 1.2, kick: 1.5,
+    /* full-auto PDW — hold the trigger and spray */
+    name: "SCORPION PDW", short: "SMG", fireMode: "FULL-AUTO",
+    mag: 40, interval: 0.06, auto: true,
+    dmgLo: 12, dmgHi: 19, pellets: 1,
+    spread: 0.022, recoil: 0.5, shake: 1.2, kick: 1.5,
     reload: 1.2, range: 30, flash: 0.7, sound: "smg",
   },
   {
-    name: "JUDGE-12", short: "SHOTGUN",
+    /* 8-pellet pump blast — shreds at close range */
+    name: "JUDGE-12", short: "SHOTGUN", fireMode: "PUMP-ACTION",
     mag: 6, interval: 0.85, auto: false,
-    dmgLo: 10, dmgHi: 16, pellets: 8,
+    dmgLo: 11, dmgHi: 17, pellets: 8,
     spread: 0.085, recoil: 1.7, shake: 6, kick: 8,
     reload: 2.1, range: 10, flash: 1.7, sound: "shotgun",
   },
@@ -198,10 +202,20 @@ export class Game {
     pz: 0, vz: 0, grounded: true,
   };
   private wIdx = 0;
-  private mags = [30, 40, 6];
+  private mags = [24, 40, 6];
   private swapT = 1;
   private triggerReady = true;
   private lockDisabled = false;
+  /* aim feel */
+  private lookDX = 0;
+  private lookDY = 0;
+  private swayX = 0;
+  private swayY = 0;
+  private landDip = 0;
+  /* juice */
+  private grain: HTMLCanvasElement | null = null;
+  private corpses: Array<{ x: number; y: number; kind: EnemyKind; t: number; scale: number }> = [];
+  private dmgDirs: Array<{ ang: number; t: number }> = [];
   private pitch = 0;
   private recoilPitch = 0;
   private shake = 0;
@@ -323,6 +337,9 @@ export class Game {
     this.crouchT = 0; this.crouchLock = false;
     this.meleeT = 0; this.meleeCd = 0; this.fovKick = 0;
     this.enemies = []; this.pickups = []; this.parts = []; this.tracers = [];
+    this.corpses = []; this.dmgDirs = [];
+    this.swayX = 0; this.swayY = 0; this.lookDX = 0; this.lookDY = 0; this.landDip = 0;
+    this.wIdx = 0; this.mags = [24, 40, 6]; this.swapT = 1; this.triggerReady = true;
     this.wave = 0; this.waveActive = false; this.waveDelay = 2.0;
     this.dead = false; this.deathT = 0; this.overSent = false;
     this.paused = false; this.mode = "play";
@@ -438,6 +455,9 @@ export class Game {
   };
 
   private onMouseMove = (e: MouseEvent) => {
+    const inWin =
+      e.clientX >= 0 && e.clientX <= window.innerWidth &&
+      e.clientY >= 0 && e.clientY <= window.innerHeight;
     this.mousePos.x = e.clientX;
     this.mousePos.y = e.clientY;
     if (this.mode === "play" && !this.paused && !this.dead) {
@@ -446,16 +466,26 @@ export class Game {
         /* true pointer-lock mouse look */
         this.p.a += e.movementX * 0.0026;
         this.pitch = clamp(this.pitch - e.movementY * 0.75, -pLim, pLim);
-      } else {
+        this.lookDX += e.movementX;
+        this.lookDY += e.movementY;
+      } else if (inWin) {
         /* relative mouse look without pointer lock:
            moving the mouse itself turns the view — same feel, no cursor */
-        const dx = clamp(e.clientX - this.prevMouse.x, -50, 50);
-        const dy = clamp(e.clientY - this.prevMouse.y, -50, 50);
-        this.p.a += dx * 0.0026;
-        this.pitch = clamp(this.pitch - dy * 0.75, -pLim, pLim);
-        this.lastMoveT = this.now;
-        this.moveVX = e.clientX - this.prevMouse.x;
-        this.moveVY = e.clientY - this.prevMouse.y;
+        const rawDX = e.clientX - this.prevMouse.x;
+        const rawDY = e.clientY - this.prevMouse.y;
+        /* ignore teleports (trackpad finger lift/reposition, OS cursor
+           jumps) so the camera can never be yanked around */
+        if (Math.abs(rawDX) < 150 && Math.abs(rawDY) < 150) {
+          const dx = clamp(rawDX, -26, 26);
+          const dy = clamp(rawDY, -26, 26);
+          this.p.a += dx * 0.0026;
+          this.pitch = clamp(this.pitch - dy * 0.75, -pLim, pLim);
+          this.lookDX += dx;
+          this.lookDY += dy;
+          this.lastMoveT = this.now;
+          this.moveVX = rawDX;
+          this.moveVY = rawDY;
+        }
       }
     }
     this.prevMouse.x = e.clientX;
@@ -599,6 +629,7 @@ export class Game {
       crouched: this.crouchT > 0.5,
       weapon: def.name,
       weaponIdx: this.wIdx,
+      fireMode: def.fireMode,
       muted: sfx.muted,
     });
   }
@@ -686,16 +717,22 @@ export class Game {
     const def = WEAPONS[this.wIdx];
     const rt = p.reloading ? Math.sin(Math.PI * clamp(p.reloadT / def.reload, 0, 1)) : 0;
     const swap = Math.sin((1 - this.swapT) * Math.PI * 0.5) * 70;
-    const gx = this.W * 0.60 + Math.sin(p.bobT) * 6 * moving;
+    /* idle breathing sway when standing still */
+    const idle = moving > 0.4 ? 0 : 1;
+    const breathX = Math.sin(this.now * 1.6) * 1.6 * idle;
+    const breathY = Math.sin(this.now * 2.3) * 1.2 * idle;
+    const gx = this.W * 0.60 + Math.sin(p.bobT) * 6 * moving + clamp(this.swayX, -26, 26) + breathX;
     const gy = this.H + 10 + Math.abs(Math.cos(p.bobT)) * 7 * moving
       + this.recoil * 15
       + this.crouchT * 24 * s
       + p.pz * 55 * s
       + rt * 85
-      + swap;
+      + swap
+      + clamp(this.swayY, -18, 18) + breathY;
     const sprinting = this.keys.has("ShiftLeft") || this.keys.has("ShiftRight");
     const rot = 0.42 + this.recoil * 0.1 + this.crouchT * 0.05
       + rt * 0.5
+      + clamp(this.swayX, -26, 26) * 0.004
       + (sprinting && moving > 0.4 ? 0.1 : 0);
     return { gx, gy, rot, s };
   }
@@ -742,6 +779,15 @@ export class Game {
     /* slightly generous hit detection when aiming without pointer lock */
     const hitR = this.locked ? 0.36 : 0.46;
     let anyHit = false;
+    let anyHead = false;
+
+    /* muzzle screen position for tracers */
+    const tipX = pose.gx + Math.cos(pose.rot) * -200 * pose.s;
+    const tipY = pose.gy + Math.sin(pose.rot) * -200 * pose.s;
+    const mx0 = tipX * 0.3 + (this.W / 2) * 0.7;
+    const my0 = tipY * 0.3 + (this.H / 2) * 0.7;
+    const eye = this.eyeH();
+    const magPlane = Math.hypot(this.planeX, this.planeY) || 0.66;
 
     for (let pel = 0; pel < def.pellets; pel++) {
       const ang = p.a + (Math.random() - 0.5) * 2 * spread;
@@ -762,25 +808,64 @@ export class Game {
       if (best) {
         anyHit = true;
         p.hits++;
-        best.hp -= def.dmgLo + Math.random() * (def.dmgHi - def.dmgLo);
-        best.flash = 0.1;
         const pr = this.project(best.x, best.y);
+        /* headshot: aim line (screen center) inside the top quarter of the sprite */
+        let head = false;
         if (pr) {
-          const eye = this.eyeH();
           const hgt = (this.H / pr.ty) * 0.86 * best.scale;
           const bottom = this.horizon() + eye * (this.H / pr.ty);
-          this.burst(pr.sx, bottom - hgt * (0.35 + Math.random() * 0.35), def.pellets > 1 ? 4 : 8, ["#c22f24", "#8a1f1a", "#e05548"], 150, 320, false);
+          head = this.H / 2 < bottom - hgt * 0.74;
+        }
+        if (head) anyHead = true;
+        const mult = head ? 1.9 : 1;
+        best.hp -= (def.dmgLo + Math.random() * (def.dmgHi - def.dmgLo)) * mult;
+        best.flash = 0.1;
+        if (pr) {
+          const hgt = (this.H / pr.ty) * 0.86 * best.scale;
+          const bottom = this.horizon() + eye * (this.H / pr.ty);
+          const hitY = bottom - hgt * (head ? 0.86 : 0.35 + Math.random() * 0.35);
+          this.burst(pr.sx, hitY, def.pellets > 1 ? 4 : 8,
+            head ? ["#ffe08a", "#c22f24", "#ff5b4d"] : ["#c22f24", "#8a1f1a", "#e05548"],
+            150, 320, false);
+          this.tracers.push({ x1: mx0, y1: my0, x2: pr.sx, y2: hitY, t: def.sound === "smg" ? 0.045 : 0.065 });
         }
         if (best.hp <= 0) this.killEnemy(best);
-      } else if (pel === 0 || Math.random() < 0.25) {
-        const rel = normAngle(ang - p.a);
-        const col = clamp(Math.round(((Math.tan(rel) / 0.66 + 1) / 2) * this.W), 0, this.W - 1);
-        this.burst(col, this.horizon() + (Math.random() - 0.5) * this.H * 0.2, 5, ["#ffd28a", "#ffb02e", "#fff2c8"], 90, 0, true);
+      } else {
+        /* wall impact sparks + tracer to the hit point on the wall */
+        const wx = p.x + dx * wallDist * 0.97, wy = p.y + dy * wallDist * 0.97;
+        const wpr = this.project(wx, wy);
+        if (wpr) {
+          const iy = this.horizon() + (eye - 0.42) * (this.H / wpr.ty);
+          if (pel === 0 || Math.random() < 0.3) {
+            this.burst(wpr.sx, iy, 5, ["#ffd28a", "#ffb02e", "#fff2c8"], 90, 0, true);
+          }
+          this.tracers.push({ x1: mx0, y1: my0, x2: wpr.sx, y2: iy, t: def.sound === "smg" ? 0.04 : 0.06 });
+        } else if (pel === 0) {
+          const rel = normAngle(ang - p.a);
+          const col = clamp(Math.round(((Math.tan(rel) / magPlane + 1) / 2) * this.W), 0, this.W - 1);
+          this.burst(col, this.horizon() + (Math.random() - 0.5) * this.H * 0.2, 5, ["#ffd28a", "#ffb02e", "#fff2c8"], 90, 0, true);
+        }
       }
     }
     if (anyHit) {
       this.hitMark = { t: 0.16, kill: false };
       sfx.hit();
+      if (anyHead) {
+        sfx.headshot();
+        this.onEvent({ type: "feed", text: "HEADSHOT — CRITICAL DAMAGE", color: "#ffe08a" });
+      }
+    }
+    /* shotgun smoke from the muzzle */
+    if (def.sound === "shotgun") {
+      for (let i = 0; i < 7; i++) {
+        const life = 0.45 + Math.random() * 0.4;
+        this.parts.push({
+          x: mx0 + (Math.random() - 0.5) * 14, y: my0 + (Math.random() - 0.5) * 8,
+          vx: (Math.random() - 0.5) * 60, vy: -30 - Math.random() * 50,
+          life, maxLife: life, size: 3.5 + Math.random() * 4.5,
+          color: "#8d939a", grav: -40, add: false,
+        });
+      }
     }
   }
 
@@ -803,6 +888,8 @@ export class Game {
   private killEnemy(e: Enemy) {
     const idx = this.enemies.indexOf(e);
     if (idx >= 0) this.enemies.splice(idx, 1);
+    this.corpses.push({ x: e.x, y: e.y, kind: e.kind, t: 0, scale: e.scale });
+    if (this.corpses.length > 14) this.corpses.shift();
     const p = this.p;
     p.chain++;
     p.chainT = 3;
@@ -833,12 +920,16 @@ export class Game {
     }
   }
 
-  private damagePlayer(dmg: number) {
+  private damagePlayer(dmg: number, fx?: number, fy?: number) {
     if (this.dead || this.mode !== "play") return;
     const p = this.p;
     p.hp -= dmg;
     this.dmgFlash = 1;
     this.shake = Math.min(14, this.shake + 5);
+    if (fx !== undefined && fy !== undefined) {
+      this.dmgDirs.push({ ang: normAngle(Math.atan2(fy - p.y, fx - p.x) - p.a), t: 0.9 });
+      if (this.dmgDirs.length > 5) this.dmgDirs.shift();
+    }
     sfx.hurt();
     if (p.hp <= 0) {
       p.hp = 0;
@@ -868,7 +959,7 @@ export class Game {
       });
     }
     /* crouching makes you a harder target */
-    if (Math.random() < chance * (1 - 0.35 * this.crouchT)) this.damagePlayer(dmg);
+    if (Math.random() < chance * (1 - 0.35 * this.crouchT)) this.damagePlayer(dmg, e.x, e.y);
   }
 
   /* ---------------------------- waves ---------------------------- */
@@ -934,7 +1025,7 @@ export class Game {
 
   private horizon(): number {
     const drop = this.dead ? Math.pow(1 - this.deathT / 1.5, 2) * this.H * 0.45 : 0;
-    return this.H / 2 + this.pitch + this.recoilPitch + drop;
+    return this.H / 2 + this.pitch + this.recoilPitch + this.landDip + drop;
   }
 
   private update(dt: number) {
@@ -1019,6 +1110,7 @@ export class Game {
     if (p.pz <= 0) {
       if (!p.grounded) {
         this.shake = Math.min(10, this.shake + 1.6);
+        this.landDip = 7;
         sfx.land();
       }
       p.pz = 0;
@@ -1044,18 +1136,30 @@ export class Game {
        past 180°. It only runs while the mouse actually moved recently and
        toward that edge — park the mouse anywhere and the view holds still
        (no runaway circle-spin). */
-    if (!this.locked && this.mousePos.x >= 0 && this.now - this.lastMoveT < 0.35) {
+    if (
+      !this.locked && this.mousePos.x >= 0 &&
+      this.now - this.lastMoveT < 0.16 &&
+      this.mousePos.x <= window.innerWidth && this.mousePos.y <= window.innerHeight
+    ) {
       const vw = Math.max(1, window.innerWidth);
       const vh = Math.max(1, window.innerHeight);
-      const m = 26;
+      const m = 20;
       const cx = this.mousePos.x, cy = this.mousePos.y;
-      const recent = 1 - clamp((this.now - this.lastMoveT) / 0.35, 0, 1);
-      if (cx < m && this.moveVX < 0) this.p.a -= dt * 2.9 * (1 - Math.max(0, cx) / m) * recent;
-      else if (cx > vw - m && this.moveVX > 0) this.p.a += dt * 2.9 * (1 - Math.max(0, vw - cx) / m) * recent;
+      const recent = 1 - clamp((this.now - this.lastMoveT) / 0.16, 0, 1);
+      if (cx < m && this.moveVX < -1) this.p.a -= dt * 3.1 * (1 - Math.max(0, cx) / m) * recent;
+      else if (cx > vw - m && this.moveVX > 1) this.p.a += dt * 3.1 * (1 - Math.max(0, vw - cx) / m) * recent;
       const pLim = this.H * 0.3;
-      if (cy < m && this.moveVY < 0) this.pitch = clamp(this.pitch + dt * 150 * (1 - Math.max(0, cy) / m) * recent, -pLim, pLim);
-      else if (cy > vh - m && this.moveVY > 0) this.pitch = clamp(this.pitch - dt * 150 * (1 - Math.max(0, vh - cy) / m) * recent, -pLim, pLim);
+      if (cy < m && this.moveVY < -1) this.pitch = clamp(this.pitch + dt * 150 * (1 - Math.max(0, cy) / m) * recent, -pLim, pLim);
+      else if (cy > vh - m && this.moveVY > 1) this.pitch = clamp(this.pitch - dt * 150 * (1 - Math.max(0, vh - cy) / m) * recent, -pLim, pLim);
     }
+
+    /* weapon sway — the gun trails your look input like a real weapon */
+    const swayK = Math.min(1, dt * 9);
+    this.swayX += (-this.lookDX * 0.55 - this.swayX) * swayK;
+    this.swayY += (this.lookDY * 0.4 - this.swayY) * swayK;
+    this.lookDX = 0;
+    this.lookDY = 0;
+    this.landDip = Math.max(0, this.landDip - dt * 22);
 
     /* firing — works with or without pointer lock */
     this.fireT -= dt;
@@ -1108,7 +1212,7 @@ export class Game {
         if (dist < 0.95 && e.cd <= 0 && e.los) {
           e.cd = 0.9;
           e.shootT = 0.12;
-          this.damagePlayer((9 + this.wave) * (1 - 0.3 * this.crouchT));
+          this.damagePlayer((9 + this.wave) * (1 - 0.3 * this.crouchT), e.x, e.y);
         }
       } else {
         if (!e.los) { vx = nx * e.speed; vy = ny * e.speed; }
@@ -1204,6 +1308,14 @@ export class Game {
     for (let i = this.tracers.length - 1; i >= 0; i--) {
       this.tracers[i].t -= dt;
       if (this.tracers[i].t <= 0) this.tracers.splice(i, 1);
+    }
+    for (let i = this.corpses.length - 1; i >= 0; i--) {
+      this.corpses[i].t += dt;
+      if (this.corpses[i].t > 0.9) this.corpses.splice(i, 1);
+    }
+    for (let i = this.dmgDirs.length - 1; i >= 0; i--) {
+      this.dmgDirs[i].t -= dt;
+      if (this.dmgDirs[i].t <= 0) this.dmgDirs.splice(i, 1);
     }
     for (const du of this.dust) {
       du.x += du.vx * dt;
@@ -1318,11 +1430,16 @@ export class Game {
     /* sprites */
     type Item =
       | { ty: number; kind: "enemy"; e: Enemy }
-      | { ty: number; kind: "pick"; pk: Pickup };
+      | { ty: number; kind: "pick"; pk: Pickup }
+      | { ty: number; kind: "corpse"; c: { x: number; y: number; kind: EnemyKind; t: number; scale: number } };
     const items: Item[] = [];
     for (const e of this.enemies) {
       const pr = this.project(e.x, e.y);
       if (pr) items.push({ ty: pr.ty, kind: "enemy", e });
+    }
+    for (const c of this.corpses) {
+      const pr = this.project(c.x, c.y);
+      if (pr) items.push({ ty: pr.ty, kind: "corpse", c });
     }
     for (const pk of this.pickups) {
       const pr = this.project(pk.x, pk.y);
@@ -1331,7 +1448,35 @@ export class Game {
     items.sort((a, b) => b.ty - a.ty);
 
     for (const it of items) {
-      if (it.kind === "enemy") {
+      if (it.kind === "corpse") {
+        /* collapsing body: tilts, sinks and fades over ~0.9s */
+        const c = it.c;
+        const ty = it.ty;
+        const pr = this.project(c.x, c.y);
+        if (!pr) continue;
+        const n = clamp(c.t / 0.9, 0, 1);
+        const img = this.enemySprites[c.kind].walk[0];
+        const hgt = (H / ty) * 0.86 * c.scale * (1 - n * 0.55);
+        const wdt = hgt * (SW / SH) * (1 + n * 0.5);
+        const bottom = horizon + ey * (H / ty);
+        const startX = pr.sx - wdt / 2;
+        const c0 = Math.max(0, Math.floor(startX));
+        const c1 = Math.min(W - 1, Math.ceil(startX + wdt));
+        const sww = Math.max(SW / wdt, 0.9);
+        ctx.globalAlpha = (1 - n) * 0.9;
+        for (let col = c0; col <= c1; col++) {
+          if (this.zbuf[col] > ty + 0.05) {
+            const srcX = clamp(((col - startX) / wdt) * SW, 0, SW - 1);
+            ctx.drawImage(img, srcX, 0, sww, SH, col, bottom - hgt, 1, hgt);
+          }
+        }
+        ctx.globalAlpha = 1;
+        /* blood pool */
+        ctx.fillStyle = `rgba(122,20,16,${(0.4 * (1 - n)).toFixed(3)})`;
+        ctx.beginPath();
+        ctx.ellipse(pr.sx, bottom - 1, wdt * 0.42, wdt * 0.1, 0, 0, Math.PI * 2);
+        ctx.fill();
+      } else if (it.kind === "enemy") {
         const e = it.e;
         const ty = it.ty;
         const pr = this.project(e.x, e.y);
@@ -1452,6 +1597,33 @@ export class Game {
     /* vignette */
     if (this.vignette) ctx.drawImage(this.vignette, 0, 0);
 
+    /* damage direction indicators */
+    if (this.dmgDirs.length > 0 && !this.dead) {
+      const cx = W / 2, cy = H / 2;
+      const rad = Math.min(W, H) * 0.34;
+      for (const d of this.dmgDirs) {
+        const a = clamp(d.t / 0.9, 0, 1);
+        const ang = d.ang - Math.PI / 2;
+        const rg = ctx.createRadialGradient(cx, cy, rad * 0.7, cx, cy, rad * 1.18);
+        rg.addColorStop(0, "rgba(255,40,28,0)");
+        rg.addColorStop(1, `rgba(255,40,28,${(0.7 * a).toFixed(3)})`);
+        ctx.fillStyle = rg;
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.arc(cx, cy, rad * 1.18, ang - 0.34, ang + 0.34);
+        ctx.closePath();
+        ctx.fill();
+      }
+    }
+
+    /* film grain */
+    const gr = this.grainCanvas();
+    const gsx = Math.floor(Math.random() * 64);
+    const gsy = Math.floor(Math.random() * 64);
+    ctx.globalAlpha = 0.05;
+    ctx.drawImage(gr, gsx, gsy, 64, 64, 0, 0, W, H);
+    ctx.globalAlpha = 1;
+
     /* damage / low hp overlay */
     const lowPulse = p.hp < 30 && !this.dead ? 0.16 + 0.12 * Math.sin(this.now * 6.5) : 0;
     const dmgA = clamp(this.dmgFlash * 0.5 + lowPulse, 0, 0.75);
@@ -1509,6 +1681,26 @@ export class Game {
       ctx.fillStyle = `rgba(255,176,46,${(0.35 + 0.65 * a).toFixed(3)})`;
       ctx.fillText(`×${this.mult()}`, cx, cy + H * 0.075);
     }
+  }
+
+  private grainCanvas(): HTMLCanvasElement {
+    if (!this.grain) {
+      const c = document.createElement("canvas");
+      c.width = 128;
+      c.height = 128;
+      const g = c.getContext("2d")!;
+      const img = g.createImageData(128, 128);
+      for (let i = 0; i < img.data.length; i += 4) {
+        const v = Math.floor(Math.random() * 255);
+        img.data[i] = v;
+        img.data[i + 1] = v;
+        img.data[i + 2] = v;
+        img.data[i + 3] = 255;
+      }
+      g.putImageData(img, 0, 0);
+      this.grain = c;
+    }
+    return this.grain;
   }
 
   private crossLines(ctx: CanvasRenderingContext2D, cx: number, cy: number, gap: number, len: number) {
