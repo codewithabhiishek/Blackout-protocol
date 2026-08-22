@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <radialGradient id="glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#ffb02e" stop-opacity="0.35" />
+      <stop offset="100%" stop-color="#04070a" stop-opacity="0" />
+    </radialGradient>
+    <linearGradient id="brass" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffe28a" />
+      <stop offset="50%" stop-color="#ffb02e" />
+      <stop offset="100%" stop-color="#d48211" />
+    </linearGradient>
+  </defs>
+
+  <!-- Dark tactical background squircle -->
+  <rect x="2" y="2" width="60" height="60" rx="14" fill="#06090e" stroke="#ffb02e" stroke-width="2" stroke-opacity="0.6"/>
+
+  <!-- Radar/optic glow backdrop -->
+  <circle cx="32" cy="32" r="24" fill="url(#glow)" />
+
+  <!-- Outer HUD targeting ring segments -->
+  <circle cx="32" cy="32" r="21" fill="none" stroke="#ffb02e" stroke-width="1.8" stroke-dasharray="14 6" stroke-opacity="0.45" />
+
+  <!-- Inner precision ring -->
+  <circle cx="32" cy="32" r="11" fill="none" stroke="#ffb02e" stroke-width="2" stroke-opacity="0.8" />
+
+  <!-- Tactical Reticle Crosshairs -->
+  <line x1="32" y1="7" x2="32" y2="17" stroke="url(#brass)" stroke-width="2.5" stroke-linecap="round" />
+  <line x1="32" y1="47" x2="32" y2="57" stroke="url(#brass)" stroke-width="2.5" stroke-linecap="round" />
+  <line x1="7" y1="32" x2="17" y2="32" stroke="url(#brass)" stroke-width="2.5" stroke-linecap="round" />
+  <line x1="47" y1="32" x2="57" y2="32" stroke="url(#brass)" stroke-width="2.5" stroke-linecap="round" />
+
+  <!-- Tactical Chevrons at cardinal points -->
+  <polygon points="32,23 29,20 35,20" fill="#ffb02e" />
+  <polygon points="32,41 29,44 35,44" fill="#ffb02e" />
+  <polygon points="23,32 20,29 20,35" fill="#ffb02e" />
+  <polygon points="41,32 44,29 44,35" fill="#ffb02e" />
+
+  <!-- Glowing Red Laser Sight Center Dot -->
+  <circle cx="32" cy="32" r="3.5" fill="#ff382e" />
+  <circle cx="32" cy="32" r="1.5" fill="#ffffff" />
+</svg>

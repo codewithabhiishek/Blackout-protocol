@@ -531,7 +531,7 @@ export default function App() {
                   <span key={i} className="flex gap-16">
                     <span>INTEL: HOSTILE FORCES MASSING ON THE PERIMETER</span>
                     <span className="text-brass">CHAIN KILLS WITHIN 3s FOR UP TO ×5 SCORE</span>
-                    <span>MEDKITS AND RAPID-FIRE CACHES DROP FROM KILLS</span>
+                    <span>MEDKITS (+40 HP) AND RAPID-FIRE CACHES SPAWN ACROSS ARENA & DROP FROM KILLS</span>
                     <span className="text-blood">HEAVIES DETECTED FROM WAVE 03</span>
                     <span>AMMUNITION RESERVES: UNLIMITED — RELOAD DRILL ADVISED</span>
                   </span>
