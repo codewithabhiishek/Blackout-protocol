@@ -718,9 +718,10 @@ export class Game {
     }
   }
 
-  /* Gun is anchored bottom-right; its barrel is aimed along the exact line
-     from the anchor to the screen center, so the muzzle always sits on the
-     real line of fire (what you see is what you hit). */
+  /* Aiming pose: the MUZZLE is pinned just under the crosshair (the shooter
+     looks down the sights onto the target) and the receiver trails back a
+     barrel-length toward the bottom-right at a natural, shallow hold angle —
+     like a person actually shouldering the weapon. */
   private gunPose() {
     const p = this.p;
     const s = this.H / 430;
@@ -733,39 +734,38 @@ export class Game {
     const breathY = Math.sin(this.now * 2.3) * 1.2 * idle;
     const sprinting = this.keys.has("ShiftLeft") || this.keys.has("ShiftRight");
 
-    /* anchor (rear of the weapon) with all movement offsets */
-    const gx = this.W * 0.60 + Math.sin(p.bobT) * 6 * moving + clamp(this.swayX, -26, 26) + breathX;
-    const gy = this.H + 10 + Math.abs(Math.cos(p.bobT)) * 7 * moving
-      + this.recoil * 15
-      + this.crouchT * 24 * s
-      + p.pz * 55 * s
-      + rt * 85
-      + swap
-      + clamp(this.swayY, -18, 18) + breathY;
+    /* local (pre-scale) barrel length of the current weapon */
+    const barrel = this.wIdx === 1 ? 152 : this.wIdx === 2 ? 232 : 224;
 
-    /* aim the barrel from the anchor straight at the crosshair.
-       The gun models are drawn along local -X, so the canvas rotation is
-       the aim angle + PI; the muzzle direction is (rot - PI). */
-    const aimX = this.W / 2;
-    const aimY = this.H / 2 + this.pitch * 0.45;
-    const baseA = Math.atan2(aimY - gy, aimX - gx);
-    let rot = baseA + Math.PI;
-    rot += this.recoil * 0.05 + this.crouchT * 0.04
+    /* shallow, natural hold angle: barrel slopes up-and-left gently
+       (a shouldered rifle, not a steep diagonal) */
+    const rot = 0.44
+      + this.recoil * 0.06
+      + this.crouchT * 0.05
       + rt * 0.5
-      + (sprinting && moving > 0.4 ? 0.08 : 0);
+      + (sprinting && moving > 0.4 ? 0.12 : 0)
+      + clamp(this.swayX, -26, 26) * 0.003;
 
-    /* barrel length so the muzzle lands just short of center */
-    const dist = Math.hypot(aimX - gx, aimY - gy);
-    const barrelLen = dist * (this.wIdx === 1 ? 0.76 : this.wIdx === 2 ? 0.8 : 0.82);
-    /* true muzzle-tip position in screen space (uses the tilted angle so
-       tracers, smoke and flash all come out of the drawn muzzle) */
-    const muzA = rot - Math.PI;
-    const tipX = gx + Math.cos(muzA) * barrelLen;
-    const tipY = gy + Math.sin(muzA) * barrelLen;
+    /* muzzle position — just under the crosshair, shifted by the pitch so
+       looking up/down raises/lowers the gun, plus all movement offsets */
+    const tipX = this.W / 2 + 4
+      + Math.sin(p.bobT) * 5 * moving
+      + clamp(this.swayX, -26, 26) * 0.55 + breathX;
+    const tipY = this.H / 2 + this.H * 0.075 + this.pitch * 0.45
+      + Math.abs(Math.cos(p.bobT)) * 6 * moving
+      + this.recoil * 13
+      + this.crouchT * 20 * s
+      + p.pz * 50 * s
+      + rt * 70
+      + swap
+      + clamp(this.swayY, -18, 18) * 0.55 + breathY;
 
-    return { gx, gy, rot, s, tipX, tipY, barrelLen };
+    /* receiver (local origin) sits one barrel-length behind the muzzle */
+    const gx = tipX + Math.cos(rot) * barrel * s;
+    const gy = tipY + Math.sin(rot) * barrel * s;
+
+    return { gx, gy, rot, s, tipX, tipY, barrelLen: barrel * s };
   }
-
   private moveFactor(): number {
     const k = this.keys;
     const f = (k.has("KeyW") || k.has("ArrowUp") ? 1 : 0) - (k.has("KeyS") || k.has("ArrowDown") ? 1 : 0);
