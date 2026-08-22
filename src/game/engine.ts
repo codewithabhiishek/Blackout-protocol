@@ -620,6 +620,7 @@ export class Game {
     }
     this.keys.clear();
     this.mouseDown = false;
+    this.aimDownSights = false;
   };
 
   /* ---------------------------- helpers ---------------------------- */
