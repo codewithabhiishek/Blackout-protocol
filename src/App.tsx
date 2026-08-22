@@ -7,7 +7,7 @@ import { sfx } from "./game/audio";
 const HUD0: HudData = {
   hp: 100, mag: 30, magSize: 30, score: 0, kills: 0, wave: 1,
   enemies: 0, mult: 1, rapid: 0, reloading: false,
-  weapon: "PHANTOM MK-IV", muted: false,
+  weapon: "PHANTOM MK-IV", muted: false, locked: false,
 };
 
 interface FeedItem { id: number; text: string; color: string }
@@ -268,7 +268,7 @@ export default function App() {
 
   return (
     <div
-      className={`relative h-screen w-screen overflow-hidden bg-ink font-body select-none ${screen === "play" ? "cursor-none" : ""}`}
+      className={`relative h-screen w-screen overflow-hidden bg-ink font-body select-none ${screen === "play" && hud.locked ? "cursor-none" : ""}`}
       onClick={() => { if (screen === "play") gameRef.current?.clickCanvas(); }}
     >
       <canvas
@@ -301,8 +301,15 @@ export default function App() {
 
           {/* hostiles counter */}
           {screen === "play" && (
-            <div className="absolute left-1/2 top-4 -translate-x-1/2 chamfer-sm bg-black/45 px-5 py-1.5 text-[13px] font-semibold tracking-[0.34em] text-ghost">
-              HOSTILES&nbsp;&nbsp;<span className="font-bold text-blood">{String(hud.enemies).padStart(2, "0")}</span>
+            <div className="absolute left-1/2 top-4 flex -translate-x-1/2 flex-col items-center gap-1.5">
+              <div className="chamfer-sm bg-black/45 px-5 py-1.5 text-[13px] font-semibold tracking-[0.34em] text-ghost">
+                HOSTILES&nbsp;&nbsp;<span className="font-bold text-blood">{String(hud.enemies).padStart(2, "0")}</span>
+              </div>
+              {!hud.locked && (
+                <div className="chamfer-sm border border-brassdim/60 bg-black/55 px-3 py-0.5 text-[10px] font-bold tracking-[0.28em] text-brass">
+                  STEERING MODE — CURSOR AIMS THE VIEW
+                </div>
+              )}
             </div>
           )}
 
@@ -373,7 +380,7 @@ export default function App() {
           {/* controls hint */}
           {screen === "play" && (
             <div className="anim-hint absolute bottom-5 left-1/2 -translate-x-1/2 whitespace-nowrap text-[13px] font-semibold tracking-[0.22em] text-ghost">
-              WASD MOVE&ensp;·&ensp;HOLD MOUSE + MOVE TO AIM&ensp;·&ensp;LMB / RMB FIRE&ensp;·&ensp;R RELOAD&ensp;·&ensp;SHIFT SPRINT&ensp;·&ensp;P PAUSE
+              WASD MOVE&ensp;·&ensp;MOVE CURSOR TO LOOK&ensp;·&ensp;LMB / RMB FIRE&ensp;·&ensp;R RELOAD&ensp;·&ensp;SHIFT SPRINT&ensp;·&ensp;P PAUSE
             </div>
           )}
 
@@ -468,7 +475,7 @@ export default function App() {
                     ))}
                   </div>
                   <Ctrl k="W A S D" label="MOVE" />
-                  <Ctrl k="MOUSE" label="AIM — HOLD & MOVE" />
+                  <Ctrl k="MOUSE" label="LOOK — JUST MOVE CURSOR" />
                   <Ctrl k="LMB / RMB" label="FIRE (HOLD)" />
                   <Ctrl k="R" label="RELOAD" />
                   <Ctrl k="SHIFT" label="SPRINT" />
