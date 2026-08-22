@@ -6,7 +6,7 @@
 [![TailwindCSS](https://img.shields.io/badge/TailwindCSS-v4-38B2AC?logo=tailwind-css&logoColor=white)](https://tailwindcss.com/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-> **BLACKOUT PROTOCOL** is a high-octane, retro-modern 2.5D Raycast Arena First-Person Shooter built from scratch on HTML5 Canvas. Eliminate hostile waves, master 3 tactical weapons, manage emergency medkits, and survive the blackout.
+> **BLACKOUT PROTOCOL** is a high-octane, retro-modern 2.5D Raycast Arena First-Person Shooter built from scratch on HTML5 Canvas. Select from 3 distinct battlefields, equip ballistic armor plates, zoom with optical sights, and survive endless hostile waves.
 
 ---
 
@@ -20,33 +20,40 @@ Deployable with **zero backend dependencies** on [Vercel](https://vercel.com/):
 
 ## ✨ Features
 
-### 🔫 1. Realistic Tactical Weapon Systems
-- **PHANTOM MK-IV (Battle Rifle):** Semi-automatic marksman carbine with an EOTech holographic reflex optic, illuminated reticle, M-LOK handguard vents, and competition match trigger.
-- **SCORPION PDW (Submachine Gun):** Rapid full-auto personal defense weapon with high-visibility micro red-dot optic and a translucent 40-round magazine showing visible 9mm brass cartridges.
-- **JUDGE-12 (Combat Shotgun):** 8-pellet pump-action breacher with a perforated barrel heat shield, side-saddle carrier with 4 magnum shells, glowing fiber-optic sight, and tactile sliding pump reload.
-- **Tactical Combat Gloves:** Fully rendered operator arms with carbon-fiber knuckle armor plates and natural weapon-holding perspective.
+### 🛡️ 1. Ballistic Armor Plate System
+- **0–100 Armor Points (AP):** Player starts with Kevlar body armor that absorbs **65% of incoming damage** before Health is compromised.
+- **Armor Break & Ricochet Audio:** Procedural ceramic crack FX when armor shatters, and high-frequency kevlar deflection clinks.
+- **Collectible Armor Plates (+50 AP):** Guaranteed drops from heavy hostile units and scattered across tactical supply nodes.
+- **Glowing Cyan Shield Gauge:** Real-time dual-meter vitals HUD showing Health (HP) alongside Armor (AP).
 
-### 🎯 2. True 3D Hitscan & Ballistics
+### 🗺️ 2. Multiple Combat Arenas & Map Themes
+Select your combat theater directly from the Main Menu:
+- **Sector 7 Compound (Industrial Blackout Facility):** Close-quarters corridors, olive military brick, reinforced hazard pillars, and green tech power conduits.
+- **Cyber Nexus (Neo-Tokyo Skyline Rooftop):** High-tech carbon fiber plaza, neon cyan light conduits, magenta status indicators, and perimeter sniper monoliths.
+- **Bunker 404 (Desert Fortified Outpost):** Weathered sandstone bastions, interlocking blast trenches, heavy iron blast plates, and emergency red conduits.
+
+### 🔫 3. Realistic Tactical Weapon Systems & ADS Scopes
+- **PHANTOM MK-IV (Battle Rifle):** Semi-automatic marksman carbine with **2.2× optical zoom scope**, illuminated red reticle, milliradian rangefinder hashes, and match-grade accuracy.
+- **SCORPION PDW (Submachine Gun):** Rapid full-auto personal defense weapon with **1.5× green CQB reflex sight** and a translucent 40-round magazine.
+- **JUDGE-12 (Combat Shotgun):** Heavy 8-pellet pump-action breacher with an **amber buckshot spread optic** and high close-quarters stopping power.
+- **Tactical Combat Gloves:** Fully rendered operator arms with carbon-fiber knuckle armor plates.
+
+### 🎯 4. True 3D Hitscan & Ballistics
 - **Frustum-Accurate Vertical Aiming:** Fixed raycasting alignment ensuring bullets only hit targets when the crosshair is accurately over their 3D visual silhouette.
-- **Sniper Headshot System:** Hitting an enemy's upper 26% registers a critical **HEADSHOT** with 1.9× bonus damage, golden floating indicators, and custom audio stings.
+- **Sniper Headshot System:** Hitting an enemy's upper 24% registers a critical **HEADSHOT** with 1.9× bonus damage, golden floating indicators, and custom audio stings.
 
-### 🏥 3. Dynamic Supply & Medkit Drops
-- **Pre-Spawned Arena Caches:** 4 Medkits scattered in open tactical zones at game launch.
+### 🏥 5. Dynamic Supply & Medkit Drops
+- **Pre-Spawned Arena Caches:** Medkits (+40 HP) and Armor Plates (+50 AP) scattered in open tactical zones at game launch.
 - **Wave Replenishment:** 2–3 new supply drops restocked across strategic nodes per wave.
-- **Kill Drops:** Enemies drop Medkits (+40 HP) and Rapid-Fire boosters upon elimination.
 - **Emergency Airdrops:** Automatic emergency supply drop triggers when player HP is critical (< 35 HP).
 
-### 🤖 4. Intelligent Hostile AI
+### 🤖 6. Intelligent Hostile AI
 - **Grunts:** Tactical riflemen with ranged burst fire and strafing maneuvers.
 - **Runners:** Fast, aggressive melee rushers that swarm your position.
-- **Heavies:** Armored juggernauts armed with heavy machine guns appearing from Wave 3.
+- **Heavies:** Armored juggernauts armed with heavy machine guns that drop guaranteed Armor Plates.
 
-### 🔊 5. Pure Procedural Sound Engine
+### 🔊 7. Pure Procedural Sound Engine
 - 100% synthesized in real-time via the browser's **Web Audio API** — no bulky external sound files.
-- Authentic gunfire reports, shell casing clatters, knife slashes, footsteps, and spatial impacts.
-
-### ⚡ 6. Continuous Auto-Depenetration Physics
-- Circle-vs-AABB continuous collision solver eliminating corner-snagging, letting the player glide smoothly along walls and around pillars.
 
 ---
 
@@ -57,7 +64,7 @@ Deployable with **zero backend dependencies** on [Vercel](https://vercel.com/):
 | <kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd> / <kbd>↑</kbd> <kbd>←</kbd> <kbd>↓</kbd> <kbd>→</kbd> | Move / Strafe |
 | `Mouse Movement` | Look / Aim (Pointer Lock enabled) |
 | `Left Mouse Button (LMB)` | Fire Weapon |
-| `Right Mouse Button (RMB)` / <kbd>Z</kbd> | **Aim Down Sights (ADS) / Zoom Scope** |
+| `Right Mouse Button (RMB)` / <kbd>Z</kbd> | **Aim Down Sights (ADS) / Optical Zoom Scope** |
 | <kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> / <kbd>Q</kbd> / `Scroll Wheel` | Switch Weapons (Rifle / SMG / Shotgun) |
 | <kbd>R</kbd> | Reload Magazine |
 | <kbd>Shift</kbd> | Tactical Sprint |
@@ -101,11 +108,10 @@ Deployable with **zero backend dependencies** on [Vercel](https://vercel.com/):
    npm install
    ```
 
-3. **Start the local development server:**
+3. **Start the development server:**
    ```bash
    npm run dev
    ```
-   Open [http://localhost:3000](http://localhost:3000) in your browser.
 
 4. **Build for production:**
    ```bash
@@ -114,17 +120,6 @@ Deployable with **zero backend dependencies** on [Vercel](https://vercel.com/):
 
 ---
 
-## 📦 Deployment to Vercel
+## 📜 License
 
-The project includes a ready-to-deploy [`vercel.json`](vercel.json) configuration:
-
-```bash
-npx vercel
-```
-Or connect your GitHub repository directly to your [Vercel Dashboard](https://vercel.com/).
-
----
-
-## 📄 License
-
-This project is licensed under the **MIT License** — feel free to use and modify!
+MIT License &copy; 2026 Blackout Protocol Team.

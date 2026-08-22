@@ -1,20 +1,51 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Game, type HudData, type GameEvent, type OverStats } from "./game/engine";
 import { sfx } from "./game/audio";
-import { Maximize, Minimize, Volume2, VolumeX } from "lucide-react";
+import { Maximize, Minimize, Volume2, VolumeX, Shield, MapPin } from "lucide-react";
 
 /* ------------------------------------------------------------------ */
 
 const HUD0: HudData = {
-  hp: 100, mag: 24, magSize: 24, score: 0, kills: 0, wave: 1,
+  hp: 100, ap: 50, mag: 24, magSize: 24, score: 0, kills: 0, wave: 1,
   enemies: 0, mult: 1, rapid: 0, reloading: false, crouched: false,
   weapon: "PHANTOM MK-IV", weaponIdx: 0, fireMode: "SEMI-AUTO", muted: false,
+  arena: "SECTOR 7 COMPOUND", arenaId: "sector7",
 };
 
 const WEAPON_SLOTS = [
   { k: "1", short: "RIFLE" },
   { k: "2", short: "SMG" },
   { k: "3", short: "JUDGE-12" },
+];
+
+const ARENA_OPTIONS = [
+  {
+    id: "sector7",
+    name: "SECTOR 7 COMPOUND",
+    sub: "INDUSTRIAL BLACKOUT FACILITY",
+    badge: "CLOSE-MID QUARTERS",
+    badgeColor: "text-acid border-acid/40",
+    desc: "Reinforced security corridors, hazard barricades, and moody green conduit power grids.",
+    accent: "#7dff8a",
+  },
+  {
+    id: "cybernexus",
+    name: "CYBER NEXUS",
+    sub: "NEO-TOKYO SKYLINE ROOFTOP",
+    badge: "LONG RANGE / COURTYARD",
+    badgeColor: "text-[#00d4ff] border-[#00d4ff]/40",
+    desc: "High-tech carbon plaza, perimeter sniper monoliths, and neon cyan cyber terminals.",
+    accent: "#00d4ff",
+  },
+  {
+    id: "bunker",
+    name: "BUNKER 404",
+    sub: "DESERT FORTIFIED OUTPOST",
+    badge: "FORTIFIED TRENCHES",
+    badgeColor: "text-brass border-brass/40",
+    desc: "Heavy desert sandstone bastions, interlocking blast trenches, and emergency red conduits.",
+    accent: "#ffb02e",
+  },
 ];
 
 interface FeedItem { id: number; text: string; color: string }
@@ -158,9 +189,9 @@ function CrosshairIcon({ className }: { className?: string }) {
 
 function Ctrl({ k, label }: { k: string; label: string }) {
   return (
-    <div className="flex items-center justify-between gap-4 border-b border-line/60 py-[7px] last:border-0">
-      <span className="text-[13px] font-semibold tracking-[0.18em] text-ghost">{label}</span>
-      <span className="kbd">{k}</span>
+    <div className="flex items-center justify-between gap-4 border-b border-line/60 py-[6px] last:border-0">
+      <span className="text-[12px] font-semibold tracking-[0.16em] text-ghost">{label}</span>
+      <span className="kbd text-[11px]">{k}</span>
     </div>
   );
 }
@@ -177,6 +208,7 @@ export default function App() {
   const bannerTimeout = useRef(0);
 
   const [screen, setScreen] = useState<Screen>("menu");
+  const [selectedArena, setSelectedArena] = useState<string>("sector7");
   const [hud, setHud] = useState<HudData>(HUD0);
   const [feed, setFeed] = useState<FeedItem[]>([]);
   const [banner, setBanner] = useState<Banner | null>(null);
@@ -238,16 +270,17 @@ export default function App() {
     };
   }, []);
 
-  const deploy = useCallback(() => {
+  const deploy = useCallback((arenaId?: string) => {
+    const targetArena = arenaId ?? selectedArena;
     sfx.unlock();
     sfx.ui();
     setFeed([]);
     setStats(null);
     setBanner(null);
     setScreen("play");
-    gameRef.current?.startGame();
+    gameRef.current?.startGame(targetArena);
     gameRef.current?.requestLock();
-  }, []);
+  }, [selectedArena]);
 
   const resume = useCallback(() => {
     sfx.ui();
@@ -259,9 +292,9 @@ export default function App() {
     setFeed([]);
     setBanner(null);
     setScreen("play");
-    gameRef.current?.startGame();
+    gameRef.current?.startGame(selectedArena);
     gameRef.current?.requestLock();
-  }, []);
+  }, [selectedArena]);
 
   const quit = useCallback(() => {
     sfx.ui();
@@ -319,24 +352,24 @@ export default function App() {
                 {f.text}
               </div>
             ))}
-            {hud.muted && (
-              <div className="chamfer-sm bg-black/55 px-3 py-1 text-[11px] font-bold tracking-[0.22em] text-ghost">
-                AUDIO OFF — M
-              </div>
-            )}
           </div>
 
-          {/* hostiles counter */}
+          {/* hostiles counter + state */}
           {screen === "play" && (
             <div className="absolute left-1/2 top-4 flex -translate-x-1/2 flex-col items-center gap-1.5">
               <div className="chamfer-sm bg-black/45 px-5 py-1.5 text-[13px] font-semibold tracking-[0.34em] text-ghost">
                 HOSTILES&nbsp;&nbsp;<span className="font-bold text-blood">{String(hud.enemies).padStart(2, "0")}</span>
               </div>
-              {hud.crouched && (
-                <div className="chamfer-sm border border-acid/40 bg-black/55 px-3 py-0.5 text-[10px] font-bold tracking-[0.28em] text-acid">
-                  CROUCHED — STEADY AIM
+              <div className="flex items-center gap-2">
+                <div className="chamfer-sm border border-line bg-black/60 px-3 py-0.5 text-[10px] font-bold tracking-[0.24em] text-brass">
+                  {hud.arena}
                 </div>
-              )}
+                {hud.crouched && (
+                  <div className="chamfer-sm border border-acid/40 bg-black/55 px-3 py-0.5 text-[10px] font-bold tracking-[0.28em] text-acid">
+                    CROUCHED
+                  </div>
+                )}
+              </div>
             </div>
           )}
 
@@ -378,23 +411,47 @@ export default function App() {
             </div>
           </div>
 
-          {/* vitals */}
+          {/* vitals: HP + ARMOR SHIELD */}
           <div className="absolute bottom-5 left-5">
-            <div className="text-[11px] font-semibold tracking-[0.34em] text-ghost">VITALS</div>
-            <div
-              className={`font-display text-6xl leading-none tabular-nums ${hud.hp <= 30 ? "anim-blink text-blood" : ""}`}
-              style={hud.hp > 30 ? { color: hpColor } : undefined}
-            >
-              {hud.hp}
+            <div className="flex items-end gap-6">
+              {/* HP */}
+              <div>
+                <div className="text-[10px] font-bold tracking-[0.34em] text-ghost">VITALS</div>
+                <div
+                  className={`font-display text-5xl leading-none tabular-nums ${hud.hp <= 30 ? "anim-blink text-blood" : ""}`}
+                  style={hud.hp > 30 ? { color: hpColor } : undefined}
+                >
+                  {hud.hp}
+                </div>
+              </div>
+              {/* ARMOR */}
+              <div>
+                <div className="flex items-center gap-1 text-[10px] font-bold tracking-[0.34em] text-[#00d4ff]">
+                  <Shield className="h-3 w-3" /> ARMOR
+                </div>
+                <div className="font-display text-5xl leading-none text-[#00d4ff] tabular-nums">
+                  {hud.ap}
+                </div>
+              </div>
             </div>
-            <div className="chamfer-sm mt-2 h-[14px] w-60 border border-line bg-black/60 p-[2px]">
+
+            {/* HP Bar */}
+            <div className="chamfer-sm mt-2 h-[12px] w-64 border border-line bg-black/60 p-[2px]">
               <div
                 className="h-full transition-[width] duration-200"
                 style={{ width: `${hud.hp}%`, background: hpColor }}
               />
             </div>
+            {/* Armor Bar */}
+            <div className="chamfer-sm mt-1 h-[8px] w-64 border border-[#00d4ff]/40 bg-black/60 p-[1px]">
+              <div
+                className="h-full transition-[width] duration-200 bg-[#00d4ff]"
+                style={{ width: `${hud.ap}%`, boxShadow: "0 0 8px rgba(0,212,255,0.6)" }}
+              />
+            </div>
+
             {hud.rapid > 0 && (
-              <div className="mt-2 w-60">
+              <div className="mt-2 w-64">
                 <div className="flex justify-between text-[10px] font-bold tracking-[0.26em] text-brass">
                   <span>RAPID FIRE</span>
                   <span>{hud.rapid.toFixed(1)}s</span>
@@ -414,38 +471,36 @@ export default function App() {
                   key={w.k}
                   className={`chamfer-sm border px-2.5 py-1 text-[10px] font-bold tracking-[0.18em] transition-colors duration-150 ${
                     hud.weaponIdx === i
-                      ? "border-brass bg-brass/15 text-white"
-                      : "border-line bg-black/45 text-ghost/60"
+                      ? "border-brass bg-brass/20 text-brass"
+                      : "border-line bg-panel/75 text-ghost"
                   }`}
                 >
-                  <span className={hud.weaponIdx === i ? "text-brass" : "text-ghost/50"}>{w.k}</span>&ensp;{w.short}
+                  <span className="kbd mr-1 text-[9px]">{w.k}</span>
+                  {w.short}
                 </div>
               ))}
             </div>
-            <div className="text-[11px] font-semibold tracking-[0.34em] text-ghost">{hud.weapon}</div>
-            <div className="font-display text-7xl leading-none text-white tabular-nums">
-              {String(hud.mag).padStart(2, "0")}
-              <span className="text-2xl text-ghost">&nbsp;/ ∞</span>
+            <div className="text-[11px] font-semibold tracking-[0.28em] text-ghost">
+              {hud.weapon} &bull; {hud.fireMode}
             </div>
-            {hud.reloading ? (
-              <div className="anim-blink mt-1.5 text-sm font-bold tracking-[0.3em] text-brass">RELOADING</div>
-            ) : hud.mag <= Math.max(1, Math.round(hud.magSize * 0.2)) ? (
-              <div className="mt-1.5 text-sm font-bold tracking-[0.3em] text-blood">LOW AMMO — R</div>
-            ) : (
-              <div className="mt-1.5 text-[12px] font-semibold tracking-[0.3em] text-ghost/70">
-                {hud.weaponIdx === 2 ? "PUMP ACTION" : "FULL AUTO"}
-              </div>
-            )}
+            <div className="font-display text-6xl leading-none tabular-nums text-white">
+              {hud.reloading ? (
+                <span className="anim-blink text-4xl text-brass">RELOADING</span>
+              ) : (
+                <>
+                  <span className={hud.mag === 0 ? "text-blood" : hud.mag <= hud.magSize * 0.25 ? "text-brass" : "text-white"}>
+                    {hud.mag}
+                  </span>
+                  <span className="text-2xl text-ghost">/{hud.magSize}</span>
+                </>
+              )}
+            </div>
+            <div className="mt-1.5 text-[10px] font-bold tracking-[0.22em] text-ghost/70">
+              [RMB / Z] ZOOM SCOPE &bull; [LMB] FIRE &bull; [V / E] MELEE
+            </div>
           </div>
 
-          {/* controls hint */}
-          {screen === "play" && (
-            <div className="anim-hint absolute bottom-5 left-1/2 -translate-x-1/2 whitespace-nowrap text-[13px] font-semibold tracking-[0.22em] text-ghost">
-              WASD MOVE&ensp;·&ensp;MOUSE AIM&ensp;·&ensp;RMB / Z ZOOM SCOPE&ensp;·&ensp;LMB FIRE&ensp;·&ensp;1-3 WEAPONS&ensp;·&ensp;SPACE JUMP&ensp;·&ensp;C CROUCH&ensp;·&ensp;V KNIFE&ensp;·&ensp;R RELOAD&ensp;·&ensp;F FULLSCREEN
-            </div>
-          )}
-
-          {/* wave banner */}
+          {/* wave / objective banner */}
           {banner && (
             <div key={banner.n} className="pointer-events-none absolute inset-x-0 top-[20%] z-30 text-center">
               <div
@@ -464,16 +519,16 @@ export default function App() {
 
       {/* ============================ MENU ============================ */}
       {screen === "menu" && (
-        <div className="absolute inset-0 z-30 overflow-hidden">
+        <div className="absolute inset-0 z-30 overflow-y-auto overflow-x-hidden">
           <MenuBackdrop />
-          <div className="scanlines absolute inset-0" />
-          <div className="absolute inset-0 bg-gradient-to-r from-ink/90 via-ink/40 to-transparent" />
+          <div className="scanlines fixed inset-0 pointer-events-none" />
+          <div className="fixed inset-0 bg-gradient-to-r from-ink/90 via-ink/50 to-transparent pointer-events-none" />
 
-          <div className="relative flex h-full flex-col justify-between p-8 md:p-14">
+          <div className="relative flex min-h-full flex-col justify-between p-6 md:p-12">
             {/* top strip */}
-            <div className="anim-rise flex items-center gap-3 text-[11px] font-bold tracking-[0.4em] text-ghost">
+            <div className="anim-rise flex flex-wrap items-center gap-3 text-[11px] font-bold tracking-[0.4em] text-ghost">
               <CrosshairIcon className="h-4 w-4 text-brass" />
-              RAYCAST TACTICAL ARENA&nbsp;&nbsp;·&nbsp;&nbsp;BUILD 2.6.1&nbsp;&nbsp;·&nbsp;&nbsp;SECTOR 7 COMPOUND
+              RAYCAST TACTICAL ARENA&nbsp;&nbsp;·&nbsp;&nbsp;BUILD 2.7.0&nbsp;&nbsp;·&nbsp;&nbsp;ARMOR & MULTI-ARENA SYSTEM
               <div className="ml-auto flex items-center gap-3">
                 <button
                   onClick={toggleFullscreen}
@@ -490,36 +545,75 @@ export default function App() {
             </div>
 
             {/* main row */}
-            <div className="grid flex-1 items-center gap-10 py-6 md:grid-cols-[7fr_5fr]">
+            <div className="grid flex-1 items-start gap-8 py-6 md:grid-cols-[7fr_5fr]">
               <div>
                 <div className="anim-rise anim-rise-1 text-sm font-bold tracking-[0.5em] text-blood">
                   OPERATION FILE // NIGHT DROP
                 </div>
-                <h1 className="anim-rise anim-rise-1 mt-3 font-display leading-[0.92]">
+                <h1 className="anim-rise anim-rise-1 mt-2 font-display leading-[0.92]">
                   <span className="block text-6xl text-white md:text-8xl" style={{ textShadow: "0 0 40px rgba(154,205,50,0.25), 6px 6px 0 rgba(0,0,0,0.55)" }}>
                     BLACKOUT
                   </span>
                   <span className="stencil-outline block text-5xl md:text-7xl">PROTOCOL</span>
                 </h1>
-                <p className="anim-rise anim-rise-2 mt-5 max-w-xl text-lg font-medium leading-snug text-ghost">
-                  The compound grid went dark at 0300. Hostile squads are flooding the arena in
-                  escalating waves. You hold the center. Keep moving, keep firing — and watch
-                  your six.
-                </p>
+
+                {/* Arena Map Selection */}
+                <div className="anim-rise anim-rise-2 mt-6 max-w-xl">
+                  <div className="mb-2.5 flex items-center justify-between">
+                    <span className="text-[11px] font-bold tracking-[0.4em] text-brass flex items-center gap-1.5">
+                      <MapPin className="h-3.5 w-3.5" /> SELECT COMBAT ARENA
+                    </span>
+                    <span className="text-[11px] font-bold tracking-[0.2em] text-ghost">3 THEMES AVAILABLE</span>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                    {ARENA_OPTIONS.map((a) => {
+                      const isSelected = selectedArena === a.id;
+                      return (
+                        <button
+                          key={a.id}
+                          onClick={() => {
+                            sfx.ui();
+                            setSelectedArena(a.id);
+                            gameRef.current?.setArena(a.id);
+                          }}
+                          className={`chamfer-sm text-left p-3 border transition-all cursor-pointer ${
+                            isSelected
+                              ? "bg-panel border-brass shadow-[0_0_15px_rgba(255,176,46,0.25)]"
+                              : "bg-panel/60 border-line hover:border-line/90 hover:bg-panel/80 text-ghost"
+                          }`}
+                        >
+                          <div className="flex items-center justify-between mb-1">
+                            <span className={`text-[9px] font-bold px-1.5 py-0.5 border rounded-none ${a.badgeColor}`}>
+                              {a.badge}
+                            </span>
+                            {isSelected && <span className="h-2 w-2 rounded-full bg-brass animate-ping" />}
+                          </div>
+                          <div className={`font-display text-sm font-bold tracking-[0.1em] ${isSelected ? "text-white" : "text-ghost"}`}>
+                            {a.name}
+                          </div>
+                          <div className="text-[10px] text-ghost/80 mt-1 leading-tight line-clamp-2">
+                            {a.desc}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
 
                 {/* threat intel */}
                 <div className="anim-rise anim-rise-3 mt-6 max-w-xl">
-                  <div className="mb-2 text-[11px] font-bold tracking-[0.4em] text-brass">THREAT INTEL</div>
+                  <div className="mb-2 text-[11px] font-bold tracking-[0.4em] text-brass">THREAT INTEL & DROPS</div>
                   {[
-                    { c: "#ff6b4d", n: "GRUNT", d: "Rifleman. Fires in bursts, keeps distance.", b: "100 PTS" },
-                    { c: "#ff3b30", n: "RUNNER", d: "Fast melee rusher. Gets in your face.", b: "150 PTS" },
-                    { c: "#ff9f1c", n: "HEAVY", d: "Armored. 3-round bursts. Put it down first.", b: "300 PTS" },
+                    { c: "#ff6b4d", n: "GRUNT", d: "Rifleman. Fires in bursts, drops Medkits.", b: "100 PTS" },
+                    { c: "#ff3b30", n: "RUNNER", d: "Fast melee rusher. Drops Rapid Fire caches.", b: "150 PTS" },
+                    { c: "#ff9f1c", n: "HEAVY", d: "Armored. Guaranteed ARMOR PLATE drop (+50 AP).", b: "300 PTS" },
                   ].map((t) => (
                     <div key={t.n} className="chamfer-r mb-1.5 flex items-center gap-4 border border-line bg-panel/70 px-4 py-2 transition-colors hover:border-brassdim hover:bg-panel">
                       <span className="inline-block h-3 w-3 shrink-0" style={{ background: t.c, boxShadow: `0 0 10px ${t.c}` }} />
                       <span className="w-20 font-display text-sm text-white">{t.n}</span>
-                      <span className="flex-1 text-[13px] font-medium text-ghost">{t.d}</span>
-                      <span className="text-[12px] font-bold tracking-[0.2em] text-brass">{t.b}</span>
+                      <span className="flex-1 text-[12px] font-medium text-ghost">{t.d}</span>
+                      <span className="text-[11px] font-bold tracking-[0.2em] text-brass">{t.b}</span>
                     </div>
                   ))}
                 </div>
@@ -534,40 +628,40 @@ export default function App() {
                   </div>
                   <div className="mb-3 grid grid-cols-3 gap-px bg-line">
                     {[
-                      { l: "MODE", v: "WAVES" },
-                      { l: "AREA", v: "24×24" },
-                      { l: "BEST", v: best > 0 ? best.toLocaleString() : "—" },
+                      { l: "MODE", v: "SURVIVAL" },
+                      { l: "ARMOR", v: "KEVLAR 50 AP" },
+                      { l: "RECORD", v: best > 0 ? best.toLocaleString() : "—" },
                     ].map((s) => (
                       <div key={s.l} className="bg-pit px-3 py-2">
-                        <div className="text-[10px] font-semibold tracking-[0.24em] text-ghost">{s.l}</div>
-                        <div className="text-base font-bold text-white">{s.v}</div>
+                        <div className="text-[9px] font-semibold tracking-[0.24em] text-ghost">{s.l}</div>
+                        <div className="text-sm font-bold text-white">{s.v}</div>
                       </div>
                     ))}
                   </div>
                   <Ctrl k="W A S D" label="MOVE" />
                   <Ctrl k="MOUSE" label="AIM / LOOK" />
-                  <Ctrl k="LMB / RMB" label="FIRE (HOLD)" />
+                  <Ctrl k="LMB (HOLD)" label="FIRE WEAPON" />
+                  <Ctrl k="RMB / Z" label="OPTICAL ZOOM SCOPE (ADS)" />
+                  <Ctrl k="V / E" label="TACTICAL MELEE" />
                   <Ctrl k="SPACE" label="JUMP" />
                   <Ctrl k="C / CTRL" label="CROUCH (TOGGLE)" />
-                  <Ctrl k="F" label="KNIFE MELEE" />
                   <Ctrl k="1 / 2 / 3" label="SWITCH WEAPON" />
-                  <Ctrl k="WHEEL / Q" label="CYCLE WEAPON" />
                   <Ctrl k="R" label="RELOAD" />
-                  <Ctrl k="SHIFT" label="SPRINT" />
+                  <Ctrl k="SHIFT" label="TACTICAL SPRINT" />
+                  <Ctrl k="F" label="MAXIMIZE SCREEN" />
                   <Ctrl k="P / ESC" label="PAUSE" />
-                  <Ctrl k="M" label="MUTE AUDIO" />
                 </div>
 
                 <button
-                  onClick={deploy}
-                  className="chamfer group flex items-center justify-center gap-4 bg-brass px-8 py-5 font-display text-2xl tracking-[0.24em] text-ink transition-all duration-150 hover:bg-white hover:tracking-[0.32em] active:translate-y-[2px]"
+                  onClick={() => deploy()}
+                  className="chamfer group flex items-center justify-center gap-4 bg-brass px-8 py-5 font-display text-2xl tracking-[0.24em] text-ink transition-all duration-150 hover:bg-white hover:tracking-[0.32em] active:translate-y-[2px] cursor-pointer"
                   style={{ boxShadow: "0 0 34px rgba(255,176,46,0.28)" }}
                 >
                   <CrosshairIcon className="h-6 w-6 transition-transform duration-300 group-hover:rotate-90" />
-                  DEPLOY
+                  DEPLOY TO {ARENA_OPTIONS.find((a) => a.id === selectedArena)?.name}
                 </button>
                 <div className="text-center text-[12px] font-semibold tracking-[0.3em] text-ghost">
-                  PRESS <span className="kbd">ENTER</span> — CURSOR WILL LOCK TO SIGHTS
+                  PRESS <span className="kbd">ENTER</span> — SIGHTS WILL LOCK
                 </div>
               </div>
             </div>
@@ -577,11 +671,11 @@ export default function App() {
               <div className="anim-ticker flex w-max gap-16 whitespace-nowrap text-[12px] font-bold tracking-[0.34em] text-ghost/80">
                 {[0, 1].map((i) => (
                   <span key={i} className="flex gap-16">
-                    <span>INTEL: HOSTILE FORCES MASSING ON THE PERIMETER</span>
-                    <span className="text-brass">CHAIN KILLS WITHIN 3s FOR UP TO ×5 SCORE</span>
-                    <span>MEDKITS (+40 HP) AND RAPID-FIRE CACHES SPAWN ACROSS ARENA & DROP FROM KILLS</span>
-                    <span className="text-blood">HEAVIES DETECTED FROM WAVE 03</span>
-                    <span>AMMUNITION RESERVES: UNLIMITED — RELOAD DRILL ADVISED</span>
+                    <span className="text-[#00d4ff]">ARMOR PLATES ABSORB 65% INCOMING DAMAGE — PICK UP AP DROPS</span>
+                    <span className="text-brass">OPTICAL SCOPES (RMB / Z) REDUCE SPREAD BY 72%</span>
+                    <span>3 DISTINCT BATTLEFIELDS: SECTOR 7, CYBER NEXUS & BUNKER 404</span>
+                    <span className="text-blood">KILL HEAVIES FOR GUARANTEED +50 AP ARMOR PLATES</span>
+                    <span>CHAIN KILLS WITHIN 3s FOR UP TO ×5 SCORE MULTIPLIER</span>
                   </span>
                 ))}
               </div>
@@ -600,17 +694,17 @@ export default function App() {
               Cursor released. Hostiles are holding position — the clock is frozen.
             </p>
             <div className="mt-6 flex flex-col gap-2.5">
-              <button onClick={resume} className="chamfer-sm bg-brass px-6 py-3 font-display text-lg tracking-[0.22em] text-ink transition-colors hover:bg-white">
+              <button onClick={resume} className="chamfer-sm bg-brass px-6 py-3 font-display text-lg tracking-[0.22em] text-ink transition-colors hover:bg-white cursor-pointer">
                 RESUME — P
               </button>
-              <button onClick={toggleFullscreen} className="chamfer-sm border border-line bg-pit px-6 py-3 font-display text-base tracking-[0.22em] text-ghost transition-colors hover:border-brassdim hover:text-white flex items-center justify-center gap-2">
+              <button onClick={toggleFullscreen} className="chamfer-sm border border-line bg-pit px-6 py-3 font-display text-base tracking-[0.22em] text-ghost transition-colors hover:border-brassdim hover:text-white flex items-center justify-center gap-2 cursor-pointer">
                 {isFullscreen ? <Minimize className="h-4 w-4 text-brass" /> : <Maximize className="h-4 w-4 text-brass" />}
                 {isFullscreen ? "EXIT FULLSCREEN — F" : "MAXIMIZE SCREEN — F"}
               </button>
-              <button onClick={restart} className="chamfer-sm border border-line bg-pit px-6 py-3 font-display text-base tracking-[0.22em] text-ghost transition-colors hover:border-brassdim hover:text-white">
+              <button onClick={restart} className="chamfer-sm border border-line bg-pit px-6 py-3 font-display text-base tracking-[0.22em] text-ghost transition-colors hover:border-brassdim hover:text-white cursor-pointer">
                 RESTART OPERATION
               </button>
-              <button onClick={quit} className="chamfer-sm border border-line bg-pit px-6 py-3 font-display text-base tracking-[0.22em] text-ghost transition-colors hover:border-blood hover:text-blood">
+              <button onClick={quit} className="chamfer-sm border border-line bg-pit px-6 py-3 font-display text-base tracking-[0.22em] text-ghost transition-colors hover:border-blood hover:text-blood cursor-pointer">
                 ABORT TO MENU
               </button>
             </div>
@@ -668,10 +762,10 @@ export default function App() {
             </div>
 
             <div className="anim-rise anim-rise-2 mt-5 flex gap-3">
-              <button onClick={restart} className="chamfer flex-1 bg-brass px-6 py-4 font-display text-xl tracking-[0.22em] text-ink transition-all hover:bg-white active:translate-y-[2px]">
+              <button onClick={restart} className="chamfer flex-1 bg-brass px-6 py-4 font-display text-xl tracking-[0.22em] text-ink transition-all hover:bg-white active:translate-y-[2px] cursor-pointer">
                 RE-DEPLOY — ENTER
               </button>
-              <button onClick={quit} className="chamfer-r border border-line bg-panel/80 px-6 py-4 font-display text-lg tracking-[0.22em] text-ghost transition-colors hover:border-brassdim hover:text-white">
+              <button onClick={quit} className="chamfer-r border border-line bg-panel/80 px-6 py-4 font-display text-lg tracking-[0.22em] text-ghost transition-colors hover:border-brassdim hover:text-white cursor-pointer">
                 MAIN MENU
               </button>
             </div>

@@ -7,6 +7,7 @@ import {
   SW,
   SH,
   type EnemyKind,
+  type ArenaTheme,
 } from "./textures";
 import { sfx } from "./audio";
 
@@ -16,6 +17,7 @@ import { sfx } from "./audio";
 
 export interface HudData {
   hp: number;
+  ap: number;
   mag: number;
   magSize: number;
   score: number;
@@ -30,6 +32,8 @@ export interface HudData {
   weaponIdx: number;
   fireMode: string;
   muted: boolean;
+  arena: string;
+  arenaId: string;
 }
 
 export interface OverStats {
@@ -57,7 +61,7 @@ interface Enemy {
   scale: number; points: number;
 }
 
-interface Pickup { x: number; y: number; kind: "medkit" | "rapid"; t: number }
+interface Pickup { x: number; y: number; kind: "medkit" | "rapid" | "armor"; t: number }
 interface ScreenPart {
   x: number; y: number; vx: number; vy: number;
   life: number; maxLife: number; size: number; color: string;
@@ -68,53 +72,193 @@ interface Tracer { x1: number; y1: number; x2: number; y2: number; t: number }
 interface Dust { x: number; y: number; z: number; vx: number; vy: number }
 
 /* ------------------------------------------------------------------ */
-/* Map                                                                 */
+/* Multi-Arena System                                                  */
 /* ------------------------------------------------------------------ */
 
-const MAP_ROWS = [
-  "########################",
-  "#..........MM..........#",
-  "#.CC..##........##..CC.#",
-  "#.CC..##........##..CC.#",
-  "#.....M....HH....M.....#",
-  "#......................#",
-  "#..T................T..#",
-  "#..T..C..........C..T..#",
-  "#.....C...T..T...C.....#",
-  "#.........T..T.........#",
-  "#..HH.............HH...#",
-  "#..HH.....P......HH....#",
-  "#.........M..M.........#",
-  "#.....C...M..M...C.....#",
-  "#..HH.............HH...#",
-  "#..HH....T....T...HH...#",
-  "#..T..C..........C..T..#",
-  "#..T................T..#",
-  "#......................#",
-  "#.....M....HH....M.....#",
-  "#.CC..##........##..CC.#",
-  "#.CC..##........##..CC.#",
-  "#..........MM..........#",
-  "########################",
-];
+export interface ArenaDef {
+  id: string;
+  name: string;
+  sub: string;
+  theme: ArenaTheme;
+  rows: string[];
+  spawnCells: Array<[number, number]>;
+  medkitNodes: Array<[number, number]>;
+  armorNodes: Array<[number, number]>;
+  playerStart: { x: number; y: number; a: number };
+  colors: {
+    ceiling: string;
+    ceilingGrad: string;
+    floor: string;
+    floorGrad: string;
+    minimapBg: string;
+  };
+}
+
+export const ARENAS: Record<string, ArenaDef> = {
+  sector7: {
+    id: "sector7",
+    name: "SECTOR 7 COMPOUND",
+    sub: "INDUSTRIAL BLACKOUT FACILITY",
+    theme: "sector7",
+    playerStart: { x: 11.5, y: 11.5, a: 0 },
+    colors: {
+      ceiling: "#0b130e",
+      ceilingGrad: "#04060a",
+      floor: "#141a16",
+      floorGrad: "#20291d",
+      minimapBg: "rgba(10,16,12,0.9)",
+    },
+    rows: [
+      "########################",
+      "#..........MM..........#",
+      "#.CC..##........##..CC.#",
+      "#.CC..##........##..CC.#",
+      "#.....M....HH....M.....#",
+      "#......................#",
+      "#..T................T..#",
+      "#..T..C..........C..T..#",
+      "#.....C...T..T...C.....#",
+      "#.........T..T.........#",
+      "#..HH.............HH...#",
+      "#..HH.....P......HH....#",
+      "#.........M..M.........#",
+      "#.....C...M..M...C.....#",
+      "#..HH.............HH...#",
+      "#..HH....T....T...HH...#",
+      "#..T..C..........C..T..#",
+      "#..T................T..#",
+      "#......................#",
+      "#.....M....HH....M.....#",
+      "#.CC..##........##..CC.#",
+      "#.CC..##........##..CC.#",
+      "#..........MM..........#",
+      "########################",
+    ],
+    spawnCells: [
+      [1.5, 1.5], [22.5, 1.5], [1.5, 22.5], [22.5, 22.5],
+      [9.5, 1.5], [14.5, 22.5], [1.5, 12.5], [22.5, 12.5],
+      [6.5, 6.5], [17.5, 6.5], [6.5, 17.5], [17.5, 17.5],
+      [12.5, 5.5], [5.5, 12.5], [18.5, 12.5], [12.5, 18.5],
+    ],
+    medkitNodes: [
+      [3.5, 5.5], [20.5, 5.5], [3.5, 18.5], [20.5, 18.5],
+      [5.5, 1.5], [18.5, 1.5], [5.5, 22.5], [18.5, 22.5],
+      [7.5, 11.5], [16.5, 11.5],
+    ],
+    armorNodes: [
+      [1.5, 9.5], [22.5, 9.5], [1.5, 14.5], [22.5, 14.5],
+      [11.5, 7.5], [11.5, 16.5],
+    ],
+  },
+  cybernexus: {
+    id: "cybernexus",
+    name: "CYBER NEXUS",
+    sub: "NEO-TOKYO SKYLINE ROOFTOP",
+    theme: "cybernexus",
+    playerStart: { x: 11.5, y: 11.5, a: -Math.PI / 2 },
+    colors: {
+      ceiling: "#080c14",
+      ceilingGrad: "#020408",
+      floor: "#0e1626",
+      floorGrad: "#1a2538",
+      minimapBg: "rgba(8,16,28,0.92)",
+    },
+    rows: [
+      "########################",
+      "#......TT......TT......#",
+      "#..MM......##......MM..#",
+      "#..MM..CC..##..CC..MM..#",
+      "#......CC......CC......#",
+      "#..HH..............HH..#",
+      "#..HH....T....T....HH..#",
+      "#........T....T........#",
+      "#..##..................#",
+      "#..##......CC......##..#",
+      "#......M...CC...M..##..#",
+      "#..TT..M...P....M..TT..#",
+      "#..TT..M........M..TT..#",
+      "#......M...CC...M......#",
+      "#..##......CC......##..#",
+      "#..##..................#",
+      "#........T....T........#",
+      "#..HH....T....T....HH..#",
+      "#..HH..............HH..#",
+      "#......CC......CC......#",
+      "#..MM..CC..##..CC..MM..#",
+      "#..MM......##......MM..#",
+      "#......TT......TT......#",
+      "########################",
+    ],
+    spawnCells: [
+      [2.5, 2.5], [21.5, 2.5], [2.5, 21.5], [21.5, 21.5],
+      [11.5, 2.5], [11.5, 21.5], [2.5, 11.5], [21.5, 11.5],
+      [5.5, 8.5], [18.5, 8.5], [5.5, 15.5], [18.5, 15.5],
+    ],
+    medkitNodes: [
+      [2.5, 6.5], [21.5, 6.5], [2.5, 17.5], [21.5, 17.5],
+      [11.5, 4.5], [11.5, 19.5],
+    ],
+    armorNodes: [
+      [7.5, 11.5], [16.5, 11.5], [11.5, 8.5], [11.5, 15.5],
+    ],
+  },
+  bunker: {
+    id: "bunker",
+    name: "BUNKER 404",
+    sub: "DESERT FORTIFIED OUTPOST",
+    theme: "bunker",
+    playerStart: { x: 11.5, y: 11.5, a: Math.PI },
+    colors: {
+      ceiling: "#1e1610",
+      ceilingGrad: "#0c0805",
+      floor: "#2d2319",
+      floorGrad: "#423425",
+      minimapBg: "rgba(28,20,14,0.92)",
+    },
+    rows: [
+      "########################",
+      "#..CC..............CC..#",
+      "#..CC..MM..##..MM..CC..#",
+      "#......MM..##..MM......#",
+      "#..HH..............HH..#",
+      "#..HH...C......C...HH..#",
+      "#.......C..TT..C.......#",
+      "#..........TT..........#",
+      "#..MM..##......##..MM..#",
+      "#..MM..##......##..MM..#",
+      "#..........CC..........#",
+      "#..TT..C...P...C...TT..#",
+      "#..TT..C.......C...TT..#",
+      "#..........CC..........#",
+      "#..MM..##......##..MM..#",
+      "#..MM..##......##..MM..#",
+      "#..........TT..........#",
+      "#.......C..TT..C.......#",
+      "#..HH...C......C...HH..#",
+      "#..HH..............HH..#",
+      "#......MM..##..MM......#",
+      "#..CC..MM..##..MM..CC..#",
+      "#..CC..............CC..#",
+      "########################",
+    ],
+    spawnCells: [
+      [1.5, 3.5], [22.5, 3.5], [1.5, 20.5], [22.5, 20.5],
+      [6.5, 1.5], [17.5, 1.5], [6.5, 22.5], [17.5, 22.5],
+      [1.5, 11.5], [22.5, 11.5], [11.5, 3.5], [11.5, 20.5],
+    ],
+    medkitNodes: [
+      [3.5, 8.5], [20.5, 8.5], [3.5, 15.5], [20.5, 15.5],
+      [11.5, 1.5], [11.5, 22.5],
+    ],
+    armorNodes: [
+      [5.5, 11.5], [18.5, 11.5], [11.5, 6.5], [11.5, 17.5],
+    ],
+  },
+};
 
 const LEGEND: Record<string, number> = { "#": 1, M: 2, C: 3, H: 4, T: 5 };
 const MW = 24;
 const MH = 24;
-
-const SPAWN_CELLS: Array<[number, number]> = [
-  [1.5, 1.5], [22.5, 1.5], [1.5, 22.5], [22.5, 22.5],
-  [9.5, 1.5], [14.5, 22.5], [1.5, 12.5], [22.5, 12.5],
-  [6.5, 6.5], [17.5, 6.5], [6.5, 17.5], [17.5, 17.5],
-  [12.5, 5.5], [5.5, 12.5], [18.5, 12.5], [12.5, 18.5],
-];
-
-const MEDKIT_SUPPLY_NODES: Array<[number, number]> = [
-  [3.5, 5.5], [20.5, 5.5], [3.5, 18.5], [20.5, 18.5],
-  [5.5, 1.5], [18.5, 1.5], [5.5, 22.5], [18.5, 22.5],
-  [1.5, 9.5], [22.5, 9.5], [1.5, 14.5], [22.5, 14.5],
-  [7.5, 11.5], [16.5, 11.5],
-];
 
 const KILL_WORDS = ["HOSTILE DOWN", "TARGET NEUTRALIZED", "KILL CONFIRMED", "THREAT ELIMINATED", "TANGO DOWN"];
 const WAVE_SUBS = ["HOSTILES INBOUND", "THEY'RE COMING", "HOLD THE LINE", "NO QUARTER", "STAY SHARP", "WEAPONS FREE"];
@@ -213,8 +357,10 @@ export class Game {
   private enemySprites: ReturnType<typeof makeEnemySprites>;
   private pickupSprites: ReturnType<typeof makePickupSprites>;
   private grid = new Uint8Array(MW * MH);
-  private spawnX = 10.5;
+  private arenaId = "sector7";
+  private spawnX = 11.5;
   private spawnY = 11.5;
+  private spawnA = 0;
 
   private mode: "idle" | "play" = "idle";
   private paused = false;
@@ -224,7 +370,7 @@ export class Game {
   locked = false;
 
   private p = {
-    x: 10.5, y: 11.5, a: 0, hp: 100,
+    x: 11.5, y: 11.5, a: 0, hp: 100, ap: 50,
     reloading: false, reloadT: 0,
     chain: 0, chainT: 0, score: 0, kills: 0, shots: 0, hits: 0,
     rapidT: 0, bobT: 0, lastStep: 0,
@@ -319,21 +465,10 @@ export class Game {
     this.onHud = onHud;
     this.onEvent = onEvent;
 
-    this.textures = makeWallTextures();
     this.enemySprites = makeEnemySprites();
     this.pickupSprites = makePickupSprites();
-
-    for (let y = 0; y < MH; y++) {
-      const row = (MAP_ROWS[y] ?? "").padEnd(MW, "#").slice(0, MW);
-      for (let x = 0; x < MW; x++) {
-        const ch = row[x];
-        if (ch === "P") {
-          this.spawnX = x + 0.5;
-          this.spawnY = y + 0.5;
-        }
-        this.grid[y * MW + x] = LEGEND[ch] ?? 0;
-      }
-    }
+    this.textures = makeWallTextures("sector7");
+    this.loadArena("sector7");
 
     this.resize();
     window.addEventListener("resize", this.resize);
@@ -349,6 +484,29 @@ export class Game {
 
     this.last = performance.now();
     this.raf = requestAnimationFrame(this.tick);
+  }
+
+  loadArena(arenaId: string) {
+    this.arenaId = ARENAS[arenaId] ? arenaId : "sector7";
+    const arena = ARENAS[this.arenaId];
+    for (let y = 0; y < MH; y++) {
+      const row = (arena.rows[y] ?? "").padEnd(MW, "#").slice(0, MW);
+      for (let x = 0; x < MW; x++) {
+        const ch = row[x];
+        if (ch === "P") {
+          this.spawnX = x + 0.5;
+          this.spawnY = y + 0.5;
+        }
+        this.grid[y * MW + x] = LEGEND[ch] ?? 0;
+      }
+    }
+    this.spawnA = arena.playerStart.a;
+    this.textures = makeWallTextures(arena.theme);
+    this.miniWalls = null;
+  }
+
+  setArena(arenaId: string) {
+    this.loadArena(arenaId);
   }
 
   dispose() {
@@ -369,10 +527,14 @@ export class Game {
 
   /* ---------------------------- public API ---------------------------- */
 
-  startGame() {
+  startGame(arenaId?: string) {
+    if (arenaId && ARENAS[arenaId]) {
+      this.loadArena(arenaId);
+    }
+    const arena = ARENAS[this.arenaId] ?? ARENAS.sector7;
     const p = this.p;
-    p.x = this.spawnX; p.y = this.spawnY; p.a = -Math.PI / 2;
-    p.hp = 100; p.reloading = false; p.reloadT = 0;
+    p.x = this.spawnX; p.y = this.spawnY; p.a = this.spawnA;
+    p.hp = 100; p.ap = 50; p.reloading = false; p.reloadT = 0;
     this.wIdx = 0; this.mags = [WEAPONS[0].mag, WEAPONS[1].mag, WEAPONS[2].mag];
     this.swapT = 1; this.triggerReady = true;
     p.chain = 0; p.chainT = 0; p.score = 0; p.kills = 0; p.shots = 0; p.hits = 0;
@@ -386,12 +548,8 @@ export class Game {
     this.enemies = []; this.pickups = []; this.parts = []; this.tracers = [];
     this.corpses = []; this.dmgDirs = [];
     this.decals = []; this.floaters = []; this.smoke = [];
-    this.p.chain = 0;
-    this.p.chainT = 0;
-    this.p.rapidT = 0;
     this.aimDownSights = false;
     this.zoomT = 0;
-    this.wIdx = 0; this.mags = [24, 40, 6]; this.swapT = 1; this.triggerReady = true;
     this.wave = 0; this.waveActive = false; this.waveDelay = 2.0;
     this.emergencyDropCd = 0;
     this.dead = false; this.deathT = 0; this.overSent = false;
@@ -408,12 +566,11 @@ export class Game {
         vy: (Math.random() - 0.5) * 0.16,
       });
     }
-    // Pre-spawn medkit caches across the arena so player starts with ample supplies
-    for (let i = 0; i < 4; i++) {
-      this.spawnMedkit();
-    }
+    // Pre-spawn medkit caches & armor plates across arena
+    for (let i = 0; i < 3; i++) this.spawnMedkit();
+    for (let i = 0; i < 2; i++) this.spawnArmorPlate();
     sfx.startAmbient();
-    this.onEvent({ type: "banner", title: "OPERATION BLACKOUT", sub: "ELIMINATE ALL HOSTILES — HOLD THE ARENA" });
+    this.onEvent({ type: "banner", title: arena.name, sub: arena.sub });
   }
 
   requestLock() {
@@ -755,8 +912,10 @@ export class Game {
 
   private pushHud() {
     const def = WEAPONS[this.wIdx];
+    const arena = ARENAS[this.arenaId] ?? ARENAS.sector7;
     this.onHud({
       hp: Math.max(0, Math.ceil(this.p.hp)),
+      ap: Math.max(0, Math.ceil(this.p.ap)),
       mag: this.mags[this.wIdx],
       magSize: def.mag,
       score: this.p.score,
@@ -771,6 +930,8 @@ export class Game {
       weaponIdx: this.wIdx,
       fireMode: def.fireMode,
       muted: sfx.muted,
+      arena: arena.name,
+      arenaId: arena.id,
     });
   }
 
@@ -1194,11 +1355,21 @@ export class Game {
     }
     const isLowHp = this.p.hp < 60;
     const dropRate = isLowHp ? 0.85 : 0.65;
-    if (Math.random() < dropRate) {
-      const medChance = isLowHp ? 0.85 : 0.75;
+    if (e.kind === "heavy") {
+      // Heavies always drop Armor Plates
       this.pickups.push({
         x: e.x, y: e.y,
-        kind: Math.random() < medChance ? "medkit" : "rapid",
+        kind: "armor",
+        t: 0,
+      });
+    } else if (Math.random() < dropRate) {
+      const medChance = isLowHp ? 0.75 : 0.55;
+      const rand = Math.random();
+      const kind: "medkit" | "rapid" | "armor" =
+        rand < medChance ? "medkit" : rand < medChance + 0.25 ? "armor" : "rapid";
+      this.pickups.push({
+        x: e.x, y: e.y,
+        kind,
         t: 0,
       });
     }
@@ -1207,19 +1378,40 @@ export class Game {
   private damagePlayer(dmg: number, fx?: number, fy?: number) {
     if (this.dead || this.mode !== "play") return;
     const p = this.p;
-    p.hp -= dmg;
+
+    let tookArmor = false;
+    if (p.ap > 0) {
+      tookArmor = true;
+      const absorb = Math.min(p.ap, Math.round(dmg * 0.65));
+      p.ap -= absorb;
+      const remDmg = dmg - absorb;
+      p.hp -= remDmg;
+      if (p.ap <= 0) {
+        this.floaters.push({
+          x: p.x, y: p.y, z: 1.1, vz: 0.5, t: 1.0, max: 1.0,
+          txt: "ARMOR BROKEN", color: "#00d4ff", size: 14,
+        });
+        sfx.armorBreak();
+      } else {
+        sfx.armorHit();
+      }
+    } else {
+      p.hp -= dmg;
+      sfx.hurt();
+    }
+
     this.dmgFlash = 1;
-    this.shake = Math.min(14, this.shake + 5);
+    this.shake = Math.min(14, this.shake + (tookArmor ? 3.5 : 5));
     if (fx !== undefined && fy !== undefined) {
       this.dmgDirs.push({ ang: normAngle(Math.atan2(fy - p.y, fx - p.x) - p.a), t: 0.9 });
       if (this.dmgDirs.length > 5) this.dmgDirs.shift();
     }
-    sfx.hurt();
     if (p.hp <= 0) {
       p.hp = 0;
       this.dead = true;
       this.deathT = 1.5;
       this.mouseDown = false;
+      this.aimDownSights = false;
       sfx.over();
       sfx.stopAmbient();
       if (document.pointerLockElement === this.canvas) document.exitPointerLock();
@@ -1253,7 +1445,8 @@ export class Game {
       this.pickups.push({ x, y, kind: "medkit", t: Math.random() * 5 });
       return;
     }
-    const candidates = MEDKIT_SUPPLY_NODES.filter(([nx, ny]) => {
+    const arena = ARENAS[this.arenaId] ?? ARENAS.sector7;
+    const candidates = arena.medkitNodes.filter(([nx, ny]) => {
       if (this.solid(Math.floor(nx), Math.floor(ny))) return false;
       return !this.pickups.some((pk) => Math.hypot(pk.x - nx, pk.y - ny) < 2.0);
     });
@@ -1263,8 +1456,30 @@ export class Game {
       const [nx, ny] = candidates[idx];
       this.pickups.push({ x: nx, y: ny, kind: "medkit", t: Math.random() * 5 });
     } else {
-      const sc = SPAWN_CELLS[Math.floor(Math.random() * SPAWN_CELLS.length)];
+      const sc = arena.spawnCells[Math.floor(Math.random() * arena.spawnCells.length)];
       this.pickups.push({ x: sc[0], y: sc[1], kind: "medkit", t: Math.random() * 5 });
+    }
+  }
+
+  private spawnArmorPlate(x?: number, y?: number) {
+    if (x !== undefined && y !== undefined) {
+      this.pickups.push({ x, y, kind: "armor", t: Math.random() * 5 });
+      return;
+    }
+    const arena = ARENAS[this.arenaId] ?? ARENAS.sector7;
+    const nodes = arena.armorNodes.length > 0 ? arena.armorNodes : arena.medkitNodes;
+    const candidates = nodes.filter(([nx, ny]) => {
+      if (this.solid(Math.floor(nx), Math.floor(ny))) return false;
+      return !this.pickups.some((pk) => Math.hypot(pk.x - nx, pk.y - ny) < 2.0);
+    });
+
+    if (candidates.length > 0) {
+      const idx = Math.floor(Math.random() * candidates.length);
+      const [nx, ny] = candidates[idx];
+      this.pickups.push({ x: nx, y: ny, kind: "armor", t: Math.random() * 5 });
+    } else {
+      const sc = arena.spawnCells[Math.floor(Math.random() * arena.spawnCells.length)];
+      this.pickups.push({ x: sc[0], y: sc[1], kind: "armor", t: Math.random() * 5 });
     }
   }
 
@@ -1280,7 +1495,8 @@ export class Game {
       ...Array<EnemyKind>(runners).fill("runner"),
       ...Array<EnemyKind>(heavies).fill("heavy"),
     ];
-    const cells = [...SPAWN_CELLS]
+    const arena = ARENAS[this.arenaId] ?? ARENAS.sector7;
+    const cells = [...arena.spawnCells]
       .map((c) => ({ c, d: Math.hypot(c[0] - this.p.x, c[1] - this.p.y), r: Math.random() }))
       .sort((a, b) => (a.d < 6.5 ? 1 : 0) - (b.d < 6.5 ? 1 : 0) || b.r - a.r);
     kinds.forEach((kind, i) => {
@@ -1300,11 +1516,17 @@ export class Game {
         scale: base.scale, points: base.points,
       });
     });
-    // Ensure the arena is restocked with medkits each wave
+    // Ensure arena is restocked with medkits and armor plates each wave
     const activeMedkits = this.pickups.filter((pk) => pk.kind === "medkit").length;
     const medkitsToSpawn = Math.max(2, 3 - activeMedkits);
     for (let i = 0; i < medkitsToSpawn; i++) {
       this.spawnMedkit();
+    }
+    const activeArmor = this.pickups.filter((pk) => pk.kind === "armor").length;
+    if (activeArmor < 2) {
+      for (let i = 0; i < 2 - activeArmor; i++) {
+        this.spawnArmorPlate();
+      }
     }
     sfx.wave();
     this.onEvent({
@@ -1591,11 +1813,16 @@ export class Game {
       const d = Math.hypot(pk.x - p.x, pk.y - p.y);
       if (d < 0.7) {
         this.pickups.splice(i, 1);
-        sfx.pickup();
         if (pk.kind === "medkit") {
+          sfx.pickup();
           p.hp = Math.min(100, p.hp + 40);
           this.onEvent({ type: "feed", text: "MEDKIT ACQUIRED  +40 HP", color: "#7dff8a" });
+        } else if (pk.kind === "armor") {
+          sfx.armorPickup();
+          p.ap = Math.min(100, p.ap + 50);
+          this.onEvent({ type: "feed", text: "ARMOR PLATE EQUIPPED  +50 AP", color: "#00d4ff" });
         } else {
+          sfx.pickup();
           p.rapidT = 8;
           this.onEvent({ type: "feed", text: "RAPID FIRE  8s", color: "#ffb02e" });
         }
@@ -1620,6 +1847,7 @@ export class Game {
       const bonus = 200 * this.wave;
       p.score += bonus;
       p.hp = Math.min(100, p.hp + 25);
+      p.ap = Math.min(100, p.ap + 25);
       this.onEvent({ type: "feed", text: `WAVE ${this.wave} CLEARED  +${bonus}`, color: "#e8efe9" });
       this.waveDelay = 2.6;
     }
@@ -1704,25 +1932,26 @@ export class Game {
     ctx.translate(shx, shy);
 
     /* ceiling */
+    const arena = ARENAS[this.arenaId] ?? ARENAS.sector7;
     const farD = 13;
     const ceilY = Math.max(1, horizon - (1 - ey) * (H / farD));
     const floorY = Math.min(H - 1, horizon + ey * (H / farD));
     let g = ctx.createLinearGradient(0, -40, 0, Math.max(1, ceilY));
-    g.addColorStop(0, "#04060a");
-    g.addColorStop(1, "#0b130e");
+    g.addColorStop(0, arena.colors.ceilingGrad);
+    g.addColorStop(1, arena.colors.ceiling);
     ctx.fillStyle = g;
     ctx.fillRect(-20, -40, W + 40, Math.max(1, ceilY) + 40);
     /* far band (infinity, eaten by fog) */
-    ctx.fillStyle = "#0a0f0c";
+    ctx.fillStyle = arena.colors.ceiling;
     ctx.fillRect(-20, ceilY, W + 40, Math.max(0, floorY - ceilY));
     /* floor */
     g = ctx.createLinearGradient(0, Math.max(0, floorY - 24), 0, H + 40);
-    g.addColorStop(0, "#0d130e");
-    g.addColorStop(1, "#20291d");
+    g.addColorStop(0, arena.colors.floor);
+    g.addColorStop(1, arena.colors.floorGrad);
     ctx.fillStyle = g;
     ctx.fillRect(-20, floorY, W + 40, H - floorY + 60);
     /* horizon haze */
-    ctx.fillStyle = "rgba(255,176,46,0.05)";
+    ctx.fillStyle = arena.theme === "cybernexus" ? "rgba(0,212,255,0.06)" : arena.theme === "bunker" ? "rgba(255,120,40,0.06)" : "rgba(255,176,46,0.05)";
     ctx.fillRect(-20, horizon - 1, W + 40, 2);
     g = ctx.createLinearGradient(0, horizon - 26, 0, horizon + 26);
     g.addColorStop(0, "rgba(10,16,12,0)");
@@ -2893,18 +3122,32 @@ export class Game {
     if (this.mode !== "play") return;
     const m = this.mctx;
     const S = 6;
+    const arena = ARENAS[this.arenaId] ?? ARENAS.sector7;
     if (!this.miniWalls) {
       const c = document.createElement("canvas");
       c.width = MW * S;
       c.height = MH * S;
       const g = c.getContext("2d")!;
-      g.fillStyle = "rgba(10,16,12,0.9)";
+      g.fillStyle = arena.colors.minimapBg;
       g.fillRect(0, 0, c.width, c.height);
       for (let y = 0; y < MH; y++) {
         for (let x = 0; x < MW; x++) {
           const cell = this.grid[y * MW + x];
           if (cell > 0) {
-            g.fillStyle = cell === 4 ? "#8a6a24" : cell === 5 ? "#2c6b46" : "#3d4a40";
+            g.fillStyle =
+              cell === 4
+                ? "#8a6a24"
+                : cell === 5
+                ? arena.theme === "cybernexus"
+                  ? "#00e5ff"
+                  : arena.theme === "bunker"
+                  ? "#ef4444"
+                  : "#2c6b46"
+                : arena.theme === "cybernexus"
+                ? "#1e293b"
+                : arena.theme === "bunker"
+                ? "#5c483a"
+                : "#3d4a40";
             g.fillRect(x * S, y * S, S, S);
             g.fillStyle = "rgba(255,255,255,0.12)";
             g.fillRect(x * S, y * S, S, 1);
@@ -2927,7 +3170,7 @@ export class Game {
     m.fill();
     /* pickups */
     for (const pk of this.pickups) {
-      m.fillStyle = pk.kind === "medkit" ? "#7dff8a" : "#ffb02e";
+      m.fillStyle = pk.kind === "medkit" ? "#7dff8a" : pk.kind === "armor" ? "#00d4ff" : "#ffb02e";
       m.fillRect(ox + pk.x * S - 1.5, oy + pk.y * S - 1.5, 3, 3);
     }
     /* enemies */

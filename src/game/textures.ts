@@ -1,6 +1,7 @@
 /* All game art is generated procedurally on offscreen canvases — zero image assets. */
 
 export type EnemyKind = "grunt" | "runner" | "heavy";
+export type ArenaTheme = "sector7" | "cybernexus" | "bunker";
 
 export interface EnemySprites {
   walk: [HTMLCanvasElement, HTMLCanvasElement];
@@ -28,21 +29,210 @@ function rng(seed: number) {
 }
 
 /* ------------------------------------------------------------------ */
-/* WALLS — index 1..5 (0 = dark fallback)                              */
+/* WALLS — index 1..5 (0 = dark fallback) per arena theme             */
 /* ------------------------------------------------------------------ */
 
-export function makeWallTextures(): HTMLCanvasElement[] {
+export function makeWallTextures(theme: ArenaTheme = "sector7"): HTMLCanvasElement[] {
   const out: HTMLCanvasElement[] = [];
 
   /* 0 — fallback */
   {
     const c = cv(64, 64);
     const g = c.getContext("2d")!;
-    g.fillStyle = "#1a1f1c";
+    g.fillStyle = theme === "bunker" ? "#2b2319" : theme === "cybernexus" ? "#080c14" : "#1a1f1c";
     g.fillRect(0, 0, 64, 64);
     out.push(c);
   }
 
+  if (theme === "cybernexus") {
+    /* 1 — Dark Carbon with Neon Cyan Slits */
+    {
+      const c = cv(64, 64);
+      const g = c.getContext("2d")!;
+      g.fillStyle = "#0c1017";
+      g.fillRect(0, 0, 64, 64);
+      for (let x = 0; x < 64; x += 4) {
+        for (let y = 0; y < 64; y += 4) {
+          g.fillStyle = (x + y) % 8 === 0 ? "#151b24" : "#0f141c";
+          g.fillRect(x, y, 3.5, 3.5);
+        }
+      }
+      g.fillStyle = "rgba(0, 220, 255, 0.75)";
+      g.shadowColor = "#00dcff";
+      g.shadowBlur = 6;
+      g.fillRect(30, 4, 3, 56);
+      g.shadowBlur = 0;
+      out.push(c);
+    }
+    /* 2 — Matte Black Composite with Magenta Status Indicators */
+    {
+      const c = cv(64, 64);
+      const g = c.getContext("2d")!;
+      g.fillStyle = "#12131a";
+      g.fillRect(0, 0, 64, 64);
+      for (let x = 0; x < 64; x += 16) {
+        g.fillStyle = "#1b1d28";
+        g.fillRect(x, 0, 2, 64);
+        g.fillStyle = "#08090d";
+        g.fillRect(x + 2, 0, 1, 64);
+      }
+      g.fillStyle = "rgba(220, 40, 255, 0.85)";
+      g.shadowColor = "#dc28ff";
+      g.shadowBlur = 5;
+      g.fillRect(10, 24, 12, 3);
+      g.fillRect(42, 24, 12, 3);
+      g.shadowBlur = 0;
+      out.push(c);
+    }
+    /* 3 — Translucent Holographic Grid */
+    {
+      const c = cv(64, 64);
+      const g = c.getContext("2d")!;
+      g.fillStyle = "#0a1322";
+      g.fillRect(0, 0, 64, 64);
+      g.strokeStyle = "rgba(0, 190, 255, 0.18)";
+      g.lineWidth = 1;
+      for (let i = 0; i <= 64; i += 8) {
+        g.beginPath(); g.moveTo(i, 0); g.lineTo(i, 64); g.stroke();
+        g.beginPath(); g.moveTo(0, i); g.lineTo(64, i); g.stroke();
+      }
+      g.fillStyle = "rgba(0, 240, 255, 0.65)";
+      g.fillRect(20, 20, 24, 24);
+      g.fillStyle = "#0a1322";
+      g.fillRect(22, 22, 20, 20);
+      out.push(c);
+    }
+    /* 4 — Electric Cyan / Black Caution Stripes */
+    {
+      const c = cv(64, 64);
+      const g = c.getContext("2d")!;
+      g.fillStyle = "#080e14";
+      g.fillRect(0, 0, 64, 64);
+      g.save();
+      g.beginPath(); g.rect(0, 6, 64, 52); g.clip();
+      g.translate(32, 32); g.rotate(-Math.PI / 4);
+      for (let x = -100; x < 100; x += 18) {
+        g.fillStyle = (x / 18) % 2 === 0 ? "#00e5ff" : "#0b121a";
+        g.fillRect(x, -80, 9, 160);
+      }
+      g.restore();
+      out.push(c);
+    }
+    /* 5 — Glowing Neon Cyber Conduit */
+    {
+      const c = cv(64, 64);
+      const g = c.getContext("2d")!;
+      g.fillStyle = "#080c14";
+      g.fillRect(0, 0, 64, 64);
+      g.shadowColor = "#00ffff";
+      g.shadowBlur = 8;
+      g.strokeStyle = "rgba(0, 255, 255, 0.85)";
+      g.lineWidth = 1.5;
+      g.beginPath();
+      g.moveTo(8, 0); g.lineTo(8, 24); g.lineTo(32, 24); g.lineTo(32, 48); g.lineTo(56, 48); g.lineTo(56, 64);
+      g.stroke();
+      g.fillStyle = "#ffffff";
+      g.fillRect(30, 22, 4, 4);
+      g.shadowBlur = 0;
+      out.push(c);
+    }
+    return out;
+  }
+
+  if (theme === "bunker") {
+    /* 1 — Desert Weathered Sandstone */
+    {
+      const c = cv(64, 64);
+      const g = c.getContext("2d")!;
+      const r = rng(201);
+      g.fillStyle = "#4a3c2c";
+      g.fillRect(0, 0, 64, 64);
+      const shades = ["#8a7152", "#7d6749", "#947b59", "#705c41", "#846b4d"];
+      for (let row = 0; row < 8; row++) {
+        const off = row % 2 === 0 ? 0 : 8;
+        for (let col = -1; col < 5; col++) {
+          g.fillStyle = shades[Math.floor(r() * shades.length)];
+          g.fillRect(col * 16 + off + 1, row * 8 + 1, 14, 6);
+          g.fillStyle = "rgba(255,230,190,0.06)";
+          g.fillRect(col * 16 + off + 1, row * 8 + 1, 14, 1);
+        }
+      }
+      out.push(c);
+    }
+    /* 2 — Rusted Iron Bunker Plates */
+    {
+      const c = cv(64, 64);
+      const g = c.getContext("2d")!;
+      const r = rng(202);
+      g.fillStyle = "#3d2d24";
+      g.fillRect(0, 0, 64, 64);
+      for (let x = 0; x < 64; x += 16) {
+        g.fillStyle = "#2b1e17";
+        g.fillRect(x, 0, 2, 64);
+        g.fillStyle = "rgba(200,100,50,0.18)";
+        g.fillRect(x + 2, 0, 3, 64);
+      }
+      for (let x = 5; x < 64; x += 16) {
+        for (const y of [6, 22, 42, 58]) {
+          g.fillStyle = "#5c483a";
+          g.beginPath(); g.arc(x, y, 1.8, 0, Math.PI * 2); g.fill();
+        }
+      }
+      out.push(c);
+    }
+    /* 3 — Fortified Blast Concrete */
+    {
+      const c = cv(64, 64);
+      const g = c.getContext("2d")!;
+      const r = rng(203);
+      g.fillStyle = "#47413b";
+      g.fillRect(0, 0, 64, 64);
+      for (let i = 0; i < 7; i++) {
+        const x = r() * 64, y = r() * 64, rad = 8 + r() * 14;
+        const gr = g.createRadialGradient(x, y, 1, x, y, rad);
+        gr.addColorStop(0, "rgba(35,28,22,0.45)");
+        gr.addColorStop(1, "rgba(35,28,22,0)");
+        g.fillStyle = gr;
+        g.fillRect(x - rad, y - rad, rad * 2, rad * 2);
+      }
+      out.push(c);
+    }
+    /* 4 — Desert Blast Hazard Stripes */
+    {
+      const c = cv(64, 64);
+      const g = c.getContext("2d")!;
+      g.fillStyle = "#362c22";
+      g.fillRect(0, 0, 64, 64);
+      g.save();
+      g.beginPath(); g.rect(0, 6, 64, 52); g.clip();
+      g.translate(32, 32); g.rotate(-Math.PI / 4);
+      for (let x = -100; x < 100; x += 18) {
+        g.fillStyle = (x / 18) % 2 === 0 ? "#e09028" : "#1f1710";
+        g.fillRect(x, -80, 9, 160);
+      }
+      g.restore();
+      out.push(c);
+    }
+    /* 5 — Emergency Red Conduit */
+    {
+      const c = cv(64, 64);
+      const g = c.getContext("2d")!;
+      g.fillStyle = "#211410";
+      g.fillRect(0, 0, 64, 64);
+      g.shadowColor = "#ff3b20";
+      g.shadowBlur = 6;
+      g.strokeStyle = "rgba(255, 60, 40, 0.85)";
+      g.lineWidth = 2;
+      g.beginPath();
+      g.moveTo(0, 32); g.lineTo(64, 32);
+      g.stroke();
+      g.shadowBlur = 0;
+      out.push(c);
+    }
+    return out;
+  }
+
+  /* Default — Sector 7 Compound */
   /* 1 — olive brick */
   {
     const c = cv(64, 64);
@@ -359,10 +549,10 @@ export function makeEnemySprites(): Record<EnemyKind, EnemySprites> {
 }
 
 /* ------------------------------------------------------------------ */
-/* PICKUPS                                                             */
+/* PICKUPS — Medkit (+40 HP), Rapid Fire, Armor Plate (+50 AP)        */
 /* ------------------------------------------------------------------ */
 
-export function makePickupSprites(): Record<"medkit" | "rapid", HTMLCanvasElement> {
+export function makePickupSprites(): Record<"medkit" | "rapid" | "armor", HTMLCanvasElement> {
   const med = cv(36, 36);
   {
     const g = med.getContext("2d")!;
@@ -383,6 +573,7 @@ export function makePickupSprites(): Record<"medkit" | "rapid", HTMLCanvasElemen
     g.lineWidth = 1.5;
     g.strokeRect(5, 8, 26, 22);
   }
+
   const rap = cv(36, 36);
   {
     const g = rap.getContext("2d")!;
@@ -407,5 +598,36 @@ export function makePickupSprites(): Record<"medkit" | "rapid", HTMLCanvasElemen
     g.closePath();
     g.fill();
   }
-  return { medkit: med, rapid: rap };
+
+  const arm = cv(36, 36);
+  {
+    const g = arm.getContext("2d")!;
+    g.fillStyle = "rgba(0,0,0,0.35)";
+    g.beginPath();
+    g.ellipse(18, 32, 13, 3, 0, 0, Math.PI * 2);
+    g.fill();
+    /* Kevlar Plate Body */
+    g.fillStyle = "#121b24";
+    g.fillRect(6, 7, 24, 23);
+    g.fillStyle = "#1e2c3a";
+    g.fillRect(7, 8, 22, 21);
+    /* Cyan Tactical Shield Crest */
+    g.strokeStyle = "#00d4ff";
+    g.lineWidth = 2;
+    g.strokeRect(6, 7, 24, 23);
+    g.fillStyle = "#00d4ff";
+    g.beginPath();
+    g.moveTo(18, 12);
+    g.lineTo(25, 15);
+    g.lineTo(25, 21);
+    g.lineTo(18, 26);
+    g.lineTo(11, 21);
+    g.lineTo(11, 15);
+    g.closePath();
+    g.fill();
+    g.fillStyle = "#091219";
+    g.fillRect(16, 17, 4, 4);
+  }
+
+  return { medkit: med, rapid: rap, armor: arm };
 }

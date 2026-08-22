@@ -171,6 +171,18 @@ class Sfx {
     this.tone(300, 58, 1.1, "sawtooth", 0.3);
     this.tone(200, 40, 1.2, "square", 0.18, 0.12);
   }
+  armorHit() {
+    this.tone(1450, 680, 0.08, "sine", 0.22);
+    this.noise(0.06, 0.25, 3200, 1.5, 0, "highpass");
+  }
+  armorBreak() {
+    this.tone(480, 110, 0.25, "sawtooth", 0.35);
+    this.noise(0.2, 0.4, 1800, 1.2, 0, "bandpass");
+  }
+  armorPickup() {
+    this.tone(520, 880, 0.09, "sine", 0.2);
+    this.tone(880, 1320, 0.12, "sine", 0.22, 0.05);
+  }
 
   startAmbient() {
     const ac = this.ensure();
