@@ -288,6 +288,8 @@ export class Game {
 
   private keys = new Set<string>();
   private mouseDown = false;
+  private aimDownSights = false;
+  private zoomT = 0;
   private mousePos = { x: -9999, y: -9999 };
   private prevMouse = { x: 0, y: 0 };
   private lastMoveT = -9999;
@@ -384,7 +386,11 @@ export class Game {
     this.enemies = []; this.pickups = []; this.parts = []; this.tracers = [];
     this.corpses = []; this.dmgDirs = [];
     this.decals = []; this.floaters = []; this.smoke = [];
-    this.swayX = 0; this.swayY = 0; this.lookDX = 0; this.lookDY = 0; this.landDip = 0;
+    this.p.chain = 0;
+    this.p.chainT = 0;
+    this.p.rapidT = 0;
+    this.aimDownSights = false;
+    this.zoomT = 0;
     this.wIdx = 0; this.mags = [24, 40, 6]; this.swapT = 1; this.triggerReady = true;
     this.wave = 0; this.waveActive = false; this.waveDelay = 2.0;
     this.emergencyDropCd = 0;
@@ -440,6 +446,8 @@ export class Game {
     this.pickups = [];
     this.parts = [];
     this.tracers = [];
+    this.aimDownSights = false;
+    this.zoomT = 0;
     sfx.stopAmbient();
     if (document.pointerLockElement === this.canvas) document.exitPointerLock();
   }
@@ -489,6 +497,7 @@ export class Game {
     if (["Space", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.code)) e.preventDefault();
     this.keys.add(e.code);
     if (e.code === "KeyF") this.toggleFullscreen();
+    if (e.code === "KeyZ") this.aimDownSights = !this.aimDownSights;
     if (this.mode === "play" && !this.paused && !this.dead) {
       if (e.code === "KeyR") this.startReload();
       if (e.code === "Space") this.tryJump();
@@ -524,10 +533,11 @@ export class Game {
     this.mousePos.y = e.clientY;
     if (this.mode === "play" && !this.paused && !this.dead) {
       const pLim = this.H * 0.3;
+      const sens = 1 - 0.45 * this.zoomT;
       if (this.locked) {
         /* true pointer-lock mouse look */
-        this.p.a += e.movementX * 0.0026;
-        this.pitch = clamp(this.pitch - e.movementY * 0.75, -pLim, pLim);
+        this.p.a += e.movementX * 0.0026 * sens;
+        this.pitch = clamp(this.pitch - e.movementY * 0.75 * sens, -pLim, pLim);
         this.lookDX += e.movementX;
         this.lookDY += e.movementY;
       } else if (inWin) {
@@ -540,8 +550,8 @@ export class Game {
         if (Math.abs(rawDX) < 150 && Math.abs(rawDY) < 150) {
           const dx = clamp(rawDX, -26, 26);
           const dy = clamp(rawDY, -26, 26);
-          this.p.a += dx * 0.0026;
-          this.pitch = clamp(this.pitch - dy * 0.75, -pLim, pLim);
+          this.p.a += dx * 0.0026 * sens;
+          this.pitch = clamp(this.pitch - dy * 0.75 * sens, -pLim, pLim);
           this.lookDX += dx;
           this.lookDY += dy;
           this.lastMoveT = this.now;
@@ -555,18 +565,22 @@ export class Game {
   };
 
   private onMouseDown = (e: MouseEvent) => {
-    if (e.button === 0 || e.button === 2) {
-      e.preventDefault();
-      window.focus?.();
-      this.prevMouse.x = e.clientX;
-      this.prevMouse.y = e.clientY;
+    e.preventDefault();
+    window.focus?.();
+    this.prevMouse.x = e.clientX;
+    this.prevMouse.y = e.clientY;
+    if (e.button === 0) {
       this.mouseDown = true;
       this.triggerReady = true;
-      if (this.mode === "play" && !this.locked && !this.paused && !this.dead) this.requestLock();
+    } else if (e.button === 2) {
+      this.aimDownSights = true;
     }
+    if (this.mode === "play" && !this.locked && !this.paused && !this.dead) this.requestLock();
   };
+
   private onMouseUp = (e: MouseEvent) => {
-    if (e.button === 0 || e.button === 2) this.mouseDown = false;
+    if (e.button === 0) this.mouseDown = false;
+    else if (e.button === 2) this.aimDownSights = false;
   };
 
   private onPlc = () => {
@@ -720,7 +734,10 @@ export class Game {
   }
 
   private updateDir() {
-    const mag = 0.66 + this.fovKick * 0.13 - this.crouchT * 0.03;
+    const zoomMags = [0.28, 0.44, 0.50];
+    const targetZoomMag = zoomMags[this.wIdx] ?? 0.40;
+    const baseMag = 0.66 + this.fovKick * 0.13 - this.crouchT * 0.03;
+    const mag = baseMag + (targetZoomMag - baseMag) * this.zoomT;
     this.dirX = Math.cos(this.p.a);
     this.dirY = Math.sin(this.p.a);
     this.planeX = -Math.sin(this.p.a) * mag;
@@ -863,28 +880,34 @@ export class Game {
     const sprint = sprinting && moving > 0.4 ? 1 : 0;
 
     /* ---- movement / feel offsets (rigid translation of the whole gun) ---- */
-    const bobX = Math.sin(p.bobT) * 7 * moving;
-    const bobY = Math.abs(Math.cos(p.bobT)) * 8 * moving;
-    const breathX = Math.sin(this.now * 1.5) * 1.8 * idle;
-    const breathY = Math.cos(this.now * 2.1) * 1.4 * idle;
-    const swayX = clamp(this.swayX, -26, 26) * 0.5;
-    const swayY = clamp(this.swayY, -18, 18) * 0.5;
-    const crouchDrop = this.crouchT * 26 * s;
-    const jumpLift = p.pz * 55 * s;
+    const bobMult = 1 - 0.75 * this.zoomT;
+    const bobX = Math.sin(p.bobT) * 7 * moving * bobMult;
+    const bobY = Math.abs(Math.cos(p.bobT)) * 8 * moving * bobMult;
+    const breathX = Math.sin(this.now * 1.5) * 1.8 * idle * bobMult;
+    const breathY = Math.cos(this.now * 2.1) * 1.4 * idle * bobMult;
+    const swayX = clamp(this.swayX, -26, 26) * 0.5 * bobMult;
+    const swayY = clamp(this.swayY, -18, 18) * 0.5 * bobMult;
+    const crouchDrop = this.crouchT * 26 * s * (1 - 0.5 * this.zoomT);
+    const jumpLift = p.pz * 55 * s * (1 - 0.5 * this.zoomT);
     const reloadDrop = rt * 90 + swap;
-    const sprintDrop = sprint * 14;
+    const sprintDrop = sprint * 14 * (1 - this.zoomT);
 
-    /* ---- aim point = screen center (where the hitscan fires) ----
-       The viewmodel is camera-attached: it stays fixed in screen space and
-       always points at the crosshair while the world/horizon moves with
-       pitch. A small pitch fraction adds feel without leaving the target. */
+    /* ---- aim point = screen center (where the hitscan fires) ---- */
     const aimX = this.W / 2 + bobX + swayX + breathX;
     const aimY = this.H / 2 - this.pitch * 0.12 + bobY + swayY + breathY
       + crouchDrop - jumpLift + reloadDrop * 0.3 + sprintDrop;
 
-    /* ---- shoulder anchor (bottom-right) defines the recede direction ---- */
-    const anchorX = this.W * cfg.anchorX + bobX + swayX * 1.5 + breathX;
-    const anchorY = this.H * cfg.anchorY + bobY + swayY * 1.5 + breathY
+    /* ---- shoulder anchor: when zoomed, aligns to center for true ADS sightline ---- */
+    const rawAnchorX = this.W * cfg.anchorX;
+    const rawAnchorY = this.H * cfg.anchorY;
+    const adsAnchorX = this.W * (this.wIdx === 0 ? 0.505 : this.wIdx === 1 ? 0.515 : 0.53);
+    const adsAnchorY = this.H * 1.01;
+
+    const curAnchorX = rawAnchorX + (adsAnchorX - rawAnchorX) * this.zoomT;
+    const curAnchorY = rawAnchorY + (adsAnchorY - rawAnchorY) * this.zoomT;
+
+    const anchorX = curAnchorX + bobX + swayX * 1.5 + breathX;
+    const anchorY = curAnchorY + bobY + swayY * 1.5 + breathY
       + crouchDrop - jumpLift + reloadDrop + sprintDrop;
 
     /* barrel recede direction: from the aim point back toward the shoulder */
@@ -893,21 +916,22 @@ export class Game {
     dx /= dl; dy /= dl;
 
     /* muzzle sits muzzlePull px from the aim point along the barrel line */
-    const tipX = aimX + dx * cfg.muzzlePull;
-    const tipY = aimY + dy * cfg.muzzlePull;
+    const curMuzzlePull = cfg.muzzlePull + (24 - cfg.muzzlePull) * this.zoomT;
+    const tipX = aimX + dx * curMuzzlePull;
+    const tipY = aimY + dy * curMuzzlePull;
 
     /* fixed barrel length (no size pulsing); receiver = muzzle + dir*length */
     const barrelLen = cfg.barrel * s;
     /* recoil spring pushes the stock back along the barrel axis */
-    const recoilBack = this.recoil * 26;
+    const recoilBack = this.recoil * (26 * (1 - 0.4 * this.zoomT));
     const gx = tipX + dx * (barrelLen + recoilBack);
     const gy = tipY + dy * (barrelLen + recoilBack);
 
     /* rotation: local -X (barrel) points from shoulder to muzzle = at the aim */
     const rot = Math.atan2(dy, dx) + cfg.holdRot
-      + this.recoil * 0.055
+      + this.recoil * 0.055 * (1 - 0.4 * this.zoomT)
       + rt * 0.5
-      + sprint * 0.12
+      + sprint * 0.12 * (1 - this.zoomT)
       + clamp(this.swayX, -26, 26) * 0.003;
 
     this.lastPose = { tipX, tipY, gx, gy };
@@ -955,9 +979,9 @@ export class Game {
     const sprinting = this.keys.has("ShiftLeft") || this.keys.has("ShiftRight");
     const airborne = this.p.grounded ? 0 : 0.02;
     const spread = Math.max(
-      0.005,
-      def.spread + this.moveFactor() * def.spread * 0.9 + (sprinting ? 0.018 : 0)
-        + this.recoil * 0.004 + airborne - this.crouchT * def.spread * 0.5
+      0.002,
+      (def.spread + this.moveFactor() * def.spread * 0.9 + (sprinting ? 0.018 : 0)
+        + this.recoil * 0.004 + airborne - this.crouchT * def.spread * 0.5) * (1 - 0.72 * this.zoomT)
     );
     /* slightly generous hit detection when aiming without pointer lock */
     const hitR = this.locked ? 0.36 : 0.46;
@@ -1348,6 +1372,11 @@ export class Game {
       this.updateFx(dt);
       return;
     }
+
+    /* ADS Zoom Interpolation */
+    const targetZoom = this.aimDownSights && !p.reloading && this.swapT >= 0.8 ? 1.0 : 0.0;
+    this.zoomT += (targetZoom - this.zoomT) * Math.min(1, dt * 14);
+    if (Math.abs(this.zoomT - targetZoom) < 0.004) this.zoomT = targetZoom;
 
     this.updateDir();
 
@@ -2079,20 +2108,126 @@ export class Game {
 
   private drawCrosshair(ctx: CanvasRenderingContext2D, W: number, H: number) {
     const cx = W / 2, cy = H / 2;
-    const sprinting = this.keys.has("ShiftLeft") || this.keys.has("ShiftRight");
-    const gap = 7 + this.moveFactor() * 5 + this.recoil * 11 + (sprinting ? 5 : 0)
-      - this.crouchT * 3 + (this.p.grounded ? 0 : 7);
-    ctx.strokeStyle = "rgba(0,0,0,0.65)";
-    ctx.lineWidth = 3;
-    this.crossLines(ctx, cx, cy, gap, 8);
-    ctx.stroke();
-    ctx.strokeStyle = "rgba(240,255,240,0.92)";
-    ctx.lineWidth = 1.4;
-    this.crossLines(ctx, cx, cy, gap, 8);
-    ctx.stroke();
-    ctx.fillStyle = "rgba(255,200,80,0.95)";
-    ctx.fillRect(cx - 1, cy - 1, 2, 2);
 
+    /* 1. Tactical Scope Overlays when aiming down sights */
+    if (this.zoomT > 0.04) {
+      const z = this.zoomT;
+      const R = H * (this.wIdx === 0 ? 0.38 : this.wIdx === 1 ? 0.43 : 0.47);
+
+      ctx.save();
+
+      // Outer darkened peripheral scope mask
+      ctx.fillStyle = `rgba(4, 7, 10, ${(0.86 * z).toFixed(3)})`;
+      ctx.beginPath();
+      ctx.rect(0, 0, W, H);
+      ctx.arc(cx, cy, R, 0, Math.PI * 2, true);
+      ctx.fill();
+
+      // Scope lens metallic rim & optic glass bevel
+      ctx.strokeStyle = `rgba(255, 176, 46, ${(0.7 * z).toFixed(3)})`;
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.arc(cx, cy, R, 0, Math.PI * 2);
+      ctx.stroke();
+
+      ctx.strokeStyle = `rgba(0, 220, 255, ${(0.35 * z).toFixed(3)})`;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(cx, cy, R - 3, 0, Math.PI * 2);
+      ctx.stroke();
+
+      if (this.wIdx === 0) {
+        // PHANTOM MK-IV: 2.2× Marksman Tactical Holographic Scope
+        ctx.strokeStyle = `rgba(255, 55, 40, ${(0.92 * z).toFixed(3)})`;
+        ctx.lineWidth = 1.5;
+        // Crosshairs with center gap
+        ctx.beginPath();
+        ctx.moveTo(cx - R * 0.88, cy); ctx.lineTo(cx - 8, cy);
+        ctx.moveTo(cx + 8, cy); ctx.lineTo(cx + R * 0.88, cy);
+        ctx.moveTo(cx, cy - R * 0.88); ctx.lineTo(cx, cy - 8);
+        ctx.moveTo(cx, cy + 8); ctx.lineTo(cx, cy + R * 0.88);
+        ctx.stroke();
+
+        // Rangefinder & sub-mil hash marks
+        ctx.lineWidth = 1;
+        for (let d = 22; d < R * 0.82; d += 22) {
+          ctx.beginPath();
+          ctx.moveTo(cx - d, cy - 3.5); ctx.lineTo(cx - d, cy + 3.5);
+          ctx.moveTo(cx + d, cy - 3.5); ctx.lineTo(cx + d, cy + 3.5);
+          ctx.moveTo(cx - 3.5, cy + d); ctx.lineTo(cx + 3.5, cy + d);
+          ctx.stroke();
+        }
+
+        // Center illuminated red dot with neon glow
+        ctx.fillStyle = `rgba(255, 55, 40, ${(0.98 * z).toFixed(3)})`;
+        ctx.beginPath(); ctx.arc(cx, cy, 2, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = `rgba(255, 55, 40, ${(0.45 * z).toFixed(3)})`;
+        ctx.beginPath(); ctx.arc(cx, cy, 6, 0, Math.PI * 2); ctx.fill();
+
+        // Tactical HUD readouts inside scope lens
+        ctx.font = "700 11px Rajdhani, monospace";
+        ctx.fillStyle = `rgba(255, 176, 46, ${(0.85 * z).toFixed(3)})`;
+        ctx.fillText("2.2× MAG", cx - R * 0.72, cy - R * 0.45);
+        ctx.fillText("EOTECH MK-IV", cx + R * 0.28, cy - R * 0.45);
+      } else if (this.wIdx === 1) {
+        // SCORPION PDW: Green High-Visibility CQB Holographic Optic
+        ctx.strokeStyle = `rgba(130, 255, 60, ${(0.92 * z).toFixed(3)})`;
+        ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(cx, cy, 20, 0, Math.PI * 2); ctx.stroke();
+        ctx.fillStyle = `rgba(130, 255, 60, ${(0.98 * z).toFixed(3)})`;
+        ctx.beginPath(); ctx.arc(cx, cy, 2.5, 0, Math.PI * 2); ctx.fill();
+
+        // 4 cardinal optic tabs
+        ctx.beginPath();
+        ctx.moveTo(cx - 32, cy); ctx.lineTo(cx - 24, cy);
+        ctx.moveTo(cx + 24, cy); ctx.lineTo(cx + 32, cy);
+        ctx.moveTo(cx, cy - 32); ctx.lineTo(cx, cy - 24);
+        ctx.moveTo(cx, cy + 24); ctx.lineTo(cx, cy + 32);
+        ctx.stroke();
+
+        ctx.font = "700 10px Rajdhani, monospace";
+        ctx.fillStyle = `rgba(130, 255, 60, ${(0.8 * z).toFixed(3)})`;
+        ctx.fillText("1.5× CQB", cx - 22, cy - 26);
+      } else {
+        // JUDGE-12: Amber Combat Shotgun Spread Ring
+        ctx.strokeStyle = `rgba(255, 176, 46, ${(0.92 * z).toFixed(3)})`;
+        ctx.lineWidth = 2.2;
+        ctx.beginPath(); ctx.arc(cx, cy, 32, 0, Math.PI * 2); ctx.stroke();
+        ctx.fillStyle = `rgba(255, 176, 46, ${(0.95 * z).toFixed(3)})`;
+        ctx.beginPath(); ctx.arc(cx, cy, 3, 0, Math.PI * 2); ctx.fill();
+
+        ctx.font = "700 10px Rajdhani, monospace";
+        ctx.fillStyle = `rgba(255, 176, 46, ${(0.8 * z).toFixed(3)})`;
+        ctx.fillText("12GA MAGNUM", cx - 32, cy - 38);
+      }
+
+      ctx.restore();
+    }
+
+    /* 2. Hipfire crosshair (fades out as zoom approaches 1.0) */
+    if (this.zoomT < 0.95) {
+      const alpha = 1 - this.zoomT;
+      ctx.save();
+      ctx.globalAlpha = alpha;
+
+      const sprinting = this.keys.has("ShiftLeft") || this.keys.has("ShiftRight");
+      const gap = 7 + this.moveFactor() * 5 + this.recoil * 11 + (sprinting ? 5 : 0)
+        - this.crouchT * 3 + (this.p.grounded ? 0 : 7);
+      ctx.strokeStyle = "rgba(0,0,0,0.65)";
+      ctx.lineWidth = 3;
+      this.crossLines(ctx, cx, cy, gap, 8);
+      ctx.stroke();
+      ctx.strokeStyle = "rgba(240,255,240,0.92)";
+      ctx.lineWidth = 1.4;
+      this.crossLines(ctx, cx, cy, gap, 8);
+      ctx.stroke();
+      ctx.fillStyle = "rgba(255,200,80,0.95)";
+      ctx.fillRect(cx - 1, cy - 1, 2, 2);
+
+      ctx.restore();
+    }
+
+    /* 3. Hit marker */
     if (this.hitMark.t > 0) {
       const a = clamp(this.hitMark.t / (this.hitMark.kill ? 0.2 : 0.16), 0, 1);
       ctx.strokeStyle = this.hitMark.kill ? `rgba(255,59,48,${a.toFixed(3)})` : `rgba(255,255,255,${a.toFixed(3)})`;
@@ -2105,6 +2240,7 @@ export class Game {
       ctx.stroke();
     }
 
+    /* 4. Chain multiplier */
     if (this.p.chain >= 2) {
       const a = clamp(this.p.chainT / 3, 0, 1);
       ctx.font = `700 ${Math.round(H * 0.045)}px Rajdhani, sans-serif`;

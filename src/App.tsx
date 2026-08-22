@@ -441,7 +441,7 @@ export default function App() {
           {/* controls hint */}
           {screen === "play" && (
             <div className="anim-hint absolute bottom-5 left-1/2 -translate-x-1/2 whitespace-nowrap text-[13px] font-semibold tracking-[0.22em] text-ghost">
-              WASD MOVE&ensp;·&ensp;MOUSE AIM&ensp;·&ensp;LMB / RMB FIRE&ensp;·&ensp;1-3 WEAPONS&ensp;·&ensp;SPACE JUMP&ensp;·&ensp;C CROUCH&ensp;·&ensp;V KNIFE&ensp;·&ensp;R RELOAD&ensp;·&ensp;F FULLSCREEN
+              WASD MOVE&ensp;·&ensp;MOUSE AIM&ensp;·&ensp;RMB / Z ZOOM SCOPE&ensp;·&ensp;LMB FIRE&ensp;·&ensp;1-3 WEAPONS&ensp;·&ensp;SPACE JUMP&ensp;·&ensp;C CROUCH&ensp;·&ensp;V KNIFE&ensp;·&ensp;R RELOAD&ensp;·&ensp;F FULLSCREEN
             </div>
           )}
 

@@ -57,7 +57,7 @@ Deployable with **zero backend dependencies** on [Vercel](https://vercel.com/):
 | <kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd> / <kbd>↑</kbd> <kbd>←</kbd> <kbd>↓</kbd> <kbd>→</kbd> | Move / Strafe |
 | `Mouse Movement` | Look / Aim (Pointer Lock enabled) |
 | `Left Mouse Button (LMB)` | Fire Weapon |
-| `Right Mouse Button (RMB)` | Alternative Fire |
+| `Right Mouse Button (RMB)` / <kbd>Z</kbd> | **Aim Down Sights (ADS) / Zoom Scope** |
 | <kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> / <kbd>Q</kbd> / `Scroll Wheel` | Switch Weapons (Rifle / SMG / Shotgun) |
 | <kbd>R</kbd> | Reload Magazine |
 | <kbd>Shift</kbd> | Tactical Sprint |
