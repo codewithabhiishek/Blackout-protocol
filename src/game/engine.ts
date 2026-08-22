@@ -62,6 +62,7 @@ interface ScreenPart {
   x: number; y: number; vx: number; vy: number;
   life: number; maxLife: number; size: number; color: string;
   grav: number; add: boolean;
+  rot?: number; vrot?: number; rect?: boolean;
 }
 interface Tracer { x1: number; y1: number; x2: number; y2: number; t: number }
 interface Dust { x: number; y: number; z: number; vx: number; vy: number }
@@ -215,6 +216,12 @@ export class Game {
   /* juice */
   private corpses: Array<{ x: number; y: number; kind: EnemyKind; t: number; scale: number }> = [];
   private dmgDirs: Array<{ ang: number; t: number }> = [];
+  /* decals: persistent blood pools on the floor (world space) */
+  private decals: Array<{ x: number; y: number; r: number; seed: number; rot: number }> = [];
+  /* floating combat text in world space */
+  private floaters: Array<{ x: number; y: number; z: number; vz: number; t: number; max: number; txt: string; color: string; size: number }> = [];
+  /* soft volumetric smoke puffs (screen space) */
+  private smoke: Array<{ x: number; y: number; vx: number; vy: number; t: number; max: number; r: number; grow: number; alpha: number; rgb: string }> = [];
   private pitch = 0;
   private recoilPitch = 0;
   private shake = 0;
@@ -222,6 +229,7 @@ export class Game {
   private muzzleT = 0;
   private recoil = 0;
   private hitMark = { t: 0, kill: false };
+  private lastHead = false;
   private fireT = 0;
   private crouchT = 0;
   private crouchLock = false;
@@ -337,6 +345,7 @@ export class Game {
     this.meleeT = 0; this.meleeCd = 0; this.fovKick = 0;
     this.enemies = []; this.pickups = []; this.parts = []; this.tracers = [];
     this.corpses = []; this.dmgDirs = [];
+    this.decals = []; this.floaters = []; this.smoke = [];
     this.swayX = 0; this.swayY = 0; this.lookDX = 0; this.lookDY = 0; this.landDip = 0;
     this.wIdx = 0; this.mags = [24, 40, 6]; this.swapT = 1; this.triggerReady = true;
     this.wave = 0; this.waveActive = false; this.waveDelay = 2.0;
@@ -763,9 +772,12 @@ export class Game {
       y: pose.gy + Math.sin(pose.rot) * 40 * pose.s - 20 * pose.s,
       vx: 90 + Math.random() * 90, vy: -160 - Math.random() * 60,
       life: 0.75, maxLife: 0.75,
-      size: def.sound === "shotgun" ? 3.2 : 2.4,
+      size: def.sound === "shotgun" ? 3.4 : 2.5,
       color: def.sound === "shotgun" ? "#c23a2a" : "#d8a437",
       grav: 620, add: false,
+      rot: Math.random() * 6.28,
+      vrot: (Math.random() > 0.5 ? 1 : -1) * (10 + Math.random() * 14),
+      rect: true,
     });
 
     const sprinting = this.keys.has("ShiftLeft") || this.keys.has("ShiftRight");
@@ -828,7 +840,15 @@ export class Game {
             150, 320, false);
           this.tracers.push({ x1: mx0, y1: my0, x2: pr.sx, y2: hitY, t: def.sound === "smg" ? 0.045 : 0.065 });
         }
-        if (best.hp <= 0) this.killEnemy(best);
+        if (best.hp <= 0) {
+          this.killEnemy(best);
+          if (head) {
+            this.floaters.push({
+              x: best.x, y: best.y, z: 1.15, vz: 0.4, t: 1.0, max: 1.0,
+              txt: "HEADSHOT", color: "#ffe08a", size: 14,
+            });
+          }
+        }
       } else {
         /* wall impact sparks + tracer to the hit point on the wall */
         const wx = p.x + dx * wallDist * 0.97, wy = p.y + dy * wallDist * 0.97;
@@ -854,17 +874,39 @@ export class Game {
         this.onEvent({ type: "feed", text: "HEADSHOT — CRITICAL DAMAGE", color: "#ffe08a" });
       }
     }
-    /* shotgun smoke from the muzzle */
-    if (def.sound === "shotgun") {
-      for (let i = 0; i < 7; i++) {
-        const life = 0.45 + Math.random() * 0.4;
-        this.parts.push({
-          x: mx0 + (Math.random() - 0.5) * 14, y: my0 + (Math.random() - 0.5) * 8,
-          vx: (Math.random() - 0.5) * 60, vy: -30 - Math.random() * 50,
-          life, maxLife: life, size: 3.5 + Math.random() * 4.5,
-          color: "#8d939a", grav: -40, add: false,
-        });
-      }
+    /* soft muzzle smoke (heavy for the shotgun, light otherwise) */
+    const smkN = def.sound === "shotgun" ? 7 : def.sound === "rifle" ? 3 : 2;
+    for (let i = 0; i < smkN; i++) {
+      this.puff(
+        mx0 + (Math.random() - 0.5) * 16, my0 + (Math.random() - 0.5) * 8,
+        (Math.random() - 0.5) * (def.sound === "shotgun" ? 70 : 34),
+        -20 - Math.random() * (def.sound === "shotgun" ? 55 : 30),
+        (def.sound === "shotgun" ? 9 : 6) + Math.random() * 6, 3.2,
+        def.sound === "shotgun" ? 0.16 : 0.1, "168,172,178",
+        0.45 + Math.random() * 0.4
+      );
+    }
+  }
+
+  private puff(x: number, y: number, vx: number, vy: number, r: number, grow: number, alpha: number, rgb: string, life: number) {
+    if (this.smoke.length > 60) this.smoke.shift();
+    this.smoke.push({ x, y, vx, vy, t: life, max: life, r, grow, alpha, rgb });
+  }
+
+  /* soft dust kicked up by footsteps */
+  private puffDust() {
+    const W = this.W, H = this.H;
+    const sprint = this.keys.has("ShiftLeft") || this.keys.has("ShiftRight");
+    const n = sprint ? 3 : 2;
+    for (let i = 0; i < n; i++) {
+      this.puff(
+        W * 0.5 + (Math.random() - 0.5) * W * 0.22,
+        H * 0.9 + Math.random() * H * 0.06,
+        (Math.random() - 0.5) * 30,
+        -10 - Math.random() * 16,
+        8 + Math.random() * 10, 2.4, 0.075, "150,158,148",
+        0.5 + Math.random() * 0.3
+      );
     }
   }
 
@@ -889,12 +931,26 @@ export class Game {
     if (idx >= 0) this.enemies.splice(idx, 1);
     this.corpses.push({ x: e.x, y: e.y, kind: e.kind, t: 0, scale: e.scale });
     if (this.corpses.length > 14) this.corpses.shift();
+    /* persistent blood pool decal on the floor */
+    this.decals.push({
+      x: e.x + (Math.random() - 0.5) * 0.3,
+      y: e.y + (Math.random() - 0.5) * 0.3,
+      r: (0.34 + Math.random() * 0.22) * e.scale,
+      seed: Math.random(), rot: Math.random() * Math.PI * 2,
+    });
+    if (this.decals.length > 40) this.decals.shift();
     const p = this.p;
     p.chain++;
     p.chainT = 3;
     p.kills++;
     const gained = e.points * this.mult();
     p.score += gained;
+    /* floating score text in world space */
+    this.floaters.push({
+      x: e.x, y: e.y, z: 0.95, vz: 0.55, t: 1.15, max: 1.15,
+      txt: `+${gained}`, color: "#ffb02e", size: 17,
+    });
+    if (this.floaters.length > 14) this.floaters.shift();
     this.hitMark = { t: 0.2, kill: true };
     this.shake = Math.min(10, this.shake + 2.5);
     sfx.kill();
@@ -1095,6 +1151,7 @@ export class Game {
         if (step !== p.lastStep) {
           p.lastStep = step;
           sfx.step();
+          this.puffDust();
         }
       }
     }
@@ -1303,6 +1360,23 @@ export class Game {
       pa.vy += pa.grav * dt;
       pa.x += pa.vx * dt;
       pa.y += pa.vy * dt;
+      if (pa.vrot) pa.rot = (pa.rot ?? 0) + pa.vrot * dt;
+    }
+    for (let i = this.floaters.length - 1; i >= 0; i--) {
+      const fl = this.floaters[i];
+      fl.t -= dt;
+      fl.z += fl.vz * dt;
+      fl.vz *= Math.pow(0.25, dt);
+      if (fl.t <= 0) this.floaters.splice(i, 1);
+    }
+    for (let i = this.smoke.length - 1; i >= 0; i--) {
+      const sm = this.smoke[i];
+      sm.t -= dt;
+      sm.x += sm.vx * dt;
+      sm.y += sm.vy * dt;
+      sm.vy -= 10 * dt;
+      sm.vx *= Math.pow(0.4, dt);
+      if (sm.t <= 0) this.smoke.splice(i, 1);
     }
     for (let i = this.tracers.length - 1; i >= 0; i--) {
       this.tracers[i].t -= dt;
@@ -1411,6 +1485,43 @@ export class Game {
         ctx.fillStyle = `rgba(4,7,6,${fog.toFixed(3)})`;
         ctx.fillRect(x, top, 1, lineH);
       }
+      /* muzzle flash lights up nearby walls */
+      if (this.muzzleT > 0 && perp < 6) {
+        const li = this.muzzleT * 16 * (1 - perp / 6);
+        ctx.fillStyle = `rgba(255,180,80,${clamp(li, 0, 0.4).toFixed(3)})`;
+        ctx.fillRect(x, top, 1, lineH);
+      }
+    }
+
+    /* blood decals on the floor */
+    for (const dc of this.decals) {
+      const pr = this.project(dc.x, dc.y);
+      if (!pr) continue;
+      const ty = pr.ty;
+      if (this.zbuf[Math.floor(clamp(pr.sx, 0, W - 1))] < ty) continue;
+      const scl = H / ty;
+      const fy = horizon + ey * scl;
+      const fade = clamp(1 - ty / 16, 0, 1);
+      if (fade <= 0.02) continue;
+      ctx.save();
+      ctx.translate(pr.sx, fy);
+      ctx.scale(1, 0.42);
+      ctx.rotate(dc.rot);
+      const R = dc.r * scl * 0.5;
+      ctx.fillStyle = `rgba(96,10,10,${(0.5 * fade).toFixed(3)})`;
+      ctx.beginPath();
+      ctx.ellipse(0, 0, R, R * 0.85, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = `rgba(140,16,12,${(0.45 * fade).toFixed(3)})`;
+      for (let b = 0; b < 4; b++) {
+        const ba = dc.seed * 6.28 + b * 1.7;
+        const bx = Math.cos(ba) * R * 0.55;
+        const by = Math.sin(ba) * R * 0.5;
+        ctx.beginPath();
+        ctx.ellipse(bx, by, R * (0.3 + ((dc.seed * (b + 2)) % 1) * 0.25), R * 0.28, ba, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
     }
 
     /* dust motes */
@@ -1484,8 +1595,10 @@ export class Game {
         const img = e.flash > 0 ? sprites.hit : sprites.walk[Math.floor(e.animT * 5) % 2];
         const hgt = (H / ty) * 0.86 * e.scale;
         const wdt = hgt * (SW / SH);
-        const bottom = horizon + ey * (H / ty);
-        const startX = pr.sx - wdt / 2;
+        /* hit-flinch: a quick upward jolt when struck */
+        const flinch = e.flash > 0 ? e.flash * 26 * (H / 430) : 0;
+        const bottom = horizon + ey * (H / ty) - flinch;
+        const startX = pr.sx - wdt / 2 + (e.flash > 0 ? (Math.random() - 0.5) * 3 : 0);
         const c0 = Math.max(0, Math.floor(startX));
         const c1 = Math.min(W - 1, Math.ceil(startX + wdt));
         const sww = Math.max(SW / wdt, 0.9);
@@ -1564,8 +1677,36 @@ export class Game {
       ctx.globalAlpha = a;
       if (pa.add) ctx.globalCompositeOperation = "lighter";
       ctx.fillStyle = pa.color;
-      ctx.fillRect(pa.x - pa.size / 2, pa.y - pa.size / 2, pa.size, pa.size);
+      if (pa.rect && pa.rot !== undefined) {
+        ctx.save();
+        ctx.translate(pa.x, pa.y);
+        ctx.rotate(pa.rot);
+        ctx.fillRect(-pa.size, -pa.size * 0.4, pa.size * 2, pa.size * 0.8);
+        ctx.restore();
+      } else {
+        ctx.fillRect(pa.x - pa.size / 2, pa.y - pa.size / 2, pa.size, pa.size);
+      }
       ctx.globalCompositeOperation = "source-over";
+    }
+    ctx.globalAlpha = 1;
+
+    /* floating combat text (score popups) */
+    ctx.textAlign = "center";
+    for (const fl of this.floaters) {
+      const pr = this.project(fl.x, fl.y);
+      if (!pr) continue;
+      const scl = H / pr.ty;
+      const a = clamp(fl.t / fl.max, 0, 1);
+      const rise = (1 - a) * 0.35;
+      const fy = horizon + (ey - fl.z - rise) * scl;
+      const fs = clamp(fl.size * scl * 0.055, 10, 30);
+      const fade = clamp(1 - pr.ty / 15, 0, 1);
+      ctx.globalAlpha = a * fade;
+      ctx.font = `700 ${fs.toFixed(1)}px Rajdhani, sans-serif`;
+      ctx.fillStyle = "rgba(0,0,0,0.75)";
+      ctx.fillText(fl.txt, pr.sx + 1, fy + 1);
+      ctx.fillStyle = fl.color;
+      ctx.fillText(fl.txt, pr.sx, fy);
     }
     ctx.globalAlpha = 1;
 
@@ -1581,6 +1722,19 @@ export class Game {
       ctx.stroke();
     }
     ctx.globalCompositeOperation = "source-over";
+
+    /* soft volumetric smoke */
+    for (const sm of this.smoke) {
+      const k = sm.t / sm.max;
+      const rr = sm.r + sm.grow * sm.r * (1 - k);
+      const a = sm.alpha * Math.sin(Math.PI * k);
+      if (a <= 0.004) continue;
+      const sg = ctx.createRadialGradient(sm.x, sm.y, 0, sm.x, sm.y, rr);
+      sg.addColorStop(0, `rgba(${sm.rgb},${a.toFixed(3)})`);
+      sg.addColorStop(1, `rgba(${sm.rgb},0)`);
+      ctx.fillStyle = sg;
+      ctx.fillRect(sm.x - rr, sm.y - rr, rr * 2, rr * 2);
+    }
 
     /* gun */
     this.drawGun(ctx);
