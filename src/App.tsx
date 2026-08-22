@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Game, type HudData, type GameEvent, type OverStats } from "./game/engine";
 import { sfx } from "./game/audio";
+import { Maximize, Minimize, Volume2, VolumeX } from "lucide-react";
 
 /* ------------------------------------------------------------------ */
 
@@ -182,6 +183,23 @@ export default function App() {
   const [stats, setStats] = useState<OverStats | null>(null);
   const [best, setBest] = useState<number>(() => Number(localStorage.getItem(BEST_KEY) ?? 0));
   const [muted, setMuted] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  const toggleFullscreen = useCallback(() => {
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen?.().catch(() => {});
+    } else {
+      document.exitFullscreen?.().catch(() => {});
+    }
+  }, []);
+
+  useEffect(() => {
+    const onFsChange = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+    };
+    document.addEventListener("fullscreenchange", onFsChange);
+    return () => document.removeEventListener("fullscreenchange", onFsChange);
+  }, []);
 
   useEffect(() => {
     const canvas = canvasRef.current!;
@@ -260,6 +278,9 @@ export default function App() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (e.code === "KeyF") {
+        toggleFullscreen();
+      }
       if (e.code !== "Enter") return;
       if (screen === "menu") deploy();
       else if (screen === "over") restart();
@@ -267,7 +288,7 @@ export default function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [screen, deploy, restart, resume]);
+  }, [screen, deploy, restart, resume, toggleFullscreen]);
 
   const inGame = screen !== "menu";
   const hpColor = hud.hp <= 30 ? "#ff3b30" : hud.hp <= 60 ? "#ffb02e" : "#9acd32";
@@ -319,8 +340,26 @@ export default function App() {
             </div>
           )}
 
-          {/* minimap + score */}
+          {/* minimap + score + header controls */}
           <div className="absolute right-4 top-4 flex flex-col items-end gap-2">
+            <div className="flex items-center gap-2">
+              <button
+                onClick={(e) => { e.stopPropagation(); toggleFullscreen(); }}
+                className="pointer-events-auto chamfer-sm border border-line bg-panel/85 px-3 py-1 text-[11px] font-bold tracking-[0.2em] text-ghost hover:text-brass hover:border-brass flex items-center gap-1.5 transition-colors cursor-pointer"
+                title="Toggle Fullscreen (F)"
+              >
+                {isFullscreen ? <Minimize className="h-3.5 w-3.5 text-brass" /> : <Maximize className="h-3.5 w-3.5 text-brass" />}
+                <span className="kbd text-[10px]">F</span> {isFullscreen ? "WINDOW" : "MAXIMIZE"}
+              </button>
+              <button
+                onClick={(e) => { e.stopPropagation(); toggleMute(); }}
+                className="pointer-events-auto chamfer-sm border border-line bg-panel/85 px-3 py-1 text-[11px] font-bold tracking-[0.2em] text-ghost hover:text-brass hover:border-brass flex items-center gap-1.5 transition-colors cursor-pointer"
+                title="Toggle Sound (M)"
+              >
+                {muted ? <VolumeX className="h-3.5 w-3.5 text-blood" /> : <Volume2 className="h-3.5 w-3.5 text-acid" />}
+                <span className="kbd text-[10px]">M</span> {muted ? "MUTED" : "AUDIO"}
+              </button>
+            </div>
             <div className="chamfer border border-line bg-panel/85 p-1.5">
               <canvas ref={miniRef} width={148} height={148} className="block h-[148px] w-[148px]" />
             </div>
@@ -402,7 +441,7 @@ export default function App() {
           {/* controls hint */}
           {screen === "play" && (
             <div className="anim-hint absolute bottom-5 left-1/2 -translate-x-1/2 whitespace-nowrap text-[13px] font-semibold tracking-[0.22em] text-ghost">
-              WASD MOVE&ensp;·&ensp;MOUSE AIM&ensp;·&ensp;LMB / RMB FIRE&ensp;·&ensp;1-3 WEAPONS&ensp;·&ensp;SPACE JUMP&ensp;·&ensp;C CROUCH&ensp;·&ensp;F KNIFE&ensp;·&ensp;R RELOAD
+              WASD MOVE&ensp;·&ensp;MOUSE AIM&ensp;·&ensp;LMB / RMB FIRE&ensp;·&ensp;1-3 WEAPONS&ensp;·&ensp;SPACE JUMP&ensp;·&ensp;C CROUCH&ensp;·&ensp;V KNIFE&ensp;·&ensp;R RELOAD&ensp;·&ensp;F FULLSCREEN
             </div>
           )}
 
@@ -435,10 +474,19 @@ export default function App() {
             <div className="anim-rise flex items-center gap-3 text-[11px] font-bold tracking-[0.4em] text-ghost">
               <CrosshairIcon className="h-4 w-4 text-brass" />
               RAYCAST TACTICAL ARENA&nbsp;&nbsp;·&nbsp;&nbsp;BUILD 2.6.1&nbsp;&nbsp;·&nbsp;&nbsp;SECTOR 7 COMPOUND
-              <span className="ml-auto hidden items-center gap-2 md:flex">
-                <span className="inline-block h-2 w-2 animate-pulse bg-acid" />
-                LINK ESTABLISHED
-              </span>
+              <div className="ml-auto flex items-center gap-3">
+                <button
+                  onClick={toggleFullscreen}
+                  className="pointer-events-auto chamfer-sm border border-line bg-panel/90 px-3.5 py-1.5 text-[11px] font-bold tracking-[0.2em] text-white hover:border-brass hover:text-brass flex items-center gap-2 transition-colors cursor-pointer"
+                >
+                  {isFullscreen ? <Minimize className="h-3.5 w-3.5 text-brass" /> : <Maximize className="h-3.5 w-3.5 text-brass" />}
+                  <span className="kbd text-[10px]">F</span> {isFullscreen ? "EXIT FULLSCREEN" : "MAXIMIZE SCREEN"}
+                </button>
+                <span className="hidden items-center gap-2 md:flex">
+                  <span className="inline-block h-2 w-2 animate-pulse bg-acid" />
+                  LINK ESTABLISHED
+                </span>
+              </div>
             </div>
 
             {/* main row */}
@@ -554,6 +602,10 @@ export default function App() {
             <div className="mt-6 flex flex-col gap-2.5">
               <button onClick={resume} className="chamfer-sm bg-brass px-6 py-3 font-display text-lg tracking-[0.22em] text-ink transition-colors hover:bg-white">
                 RESUME — P
+              </button>
+              <button onClick={toggleFullscreen} className="chamfer-sm border border-line bg-pit px-6 py-3 font-display text-base tracking-[0.22em] text-ghost transition-colors hover:border-brassdim hover:text-white flex items-center justify-center gap-2">
+                {isFullscreen ? <Minimize className="h-4 w-4 text-brass" /> : <Maximize className="h-4 w-4 text-brass" />}
+                {isFullscreen ? "EXIT FULLSCREEN — F" : "MAXIMIZE SCREEN — F"}
               </button>
               <button onClick={restart} className="chamfer-sm border border-line bg-pit px-6 py-3 font-display text-base tracking-[0.22em] text-ghost transition-colors hover:border-brassdim hover:text-white">
                 RESTART OPERATION

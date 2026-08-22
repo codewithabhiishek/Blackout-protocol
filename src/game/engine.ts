@@ -444,6 +444,14 @@ export class Game {
     if (document.pointerLockElement === this.canvas) document.exitPointerLock();
   }
 
+  toggleFullscreen() {
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen?.().catch(() => {});
+    } else {
+      document.exitFullscreen?.().catch(() => {});
+    }
+  }
+
   toggleMute(): boolean {
     const m = sfx.toggleMute();
     this.pushHud();
@@ -480,11 +488,12 @@ export class Game {
   private onKeyDown = (e: KeyboardEvent) => {
     if (["Space", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.code)) e.preventDefault();
     this.keys.add(e.code);
+    if (e.code === "KeyF") this.toggleFullscreen();
     if (this.mode === "play" && !this.paused && !this.dead) {
       if (e.code === "KeyR") this.startReload();
       if (e.code === "Space") this.tryJump();
       if (e.code === "KeyC") this.crouchLock = !this.crouchLock;
-      if (e.code === "KeyF" || e.code === "KeyV") this.tryMelee();
+      if (e.code === "KeyV" || e.code === "KeyE") this.tryMelee();
       if (e.code === "Digit1") this.switchWeapon(0);
       if (e.code === "Digit2") this.switchWeapon(1);
       if (e.code === "Digit3") this.switchWeapon(2);

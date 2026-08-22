@@ -63,7 +63,8 @@ Deployable with **zero backend dependencies** on [Vercel](https://vercel.com/):
 | <kbd>Shift</kbd> | Tactical Sprint |
 | <kbd>Space</kbd> | Jump |
 | <kbd>C</kbd> / <kbd>Ctrl</kbd> | Crouch (reduces recoil & bullet spread) |
-| <kbd>F</kbd> | Tactical Combat Knife Melee |
+| <kbd>F</kbd> | Maximize Screen / Toggle Fullscreen |
+| <kbd>V</kbd> / <kbd>E</kbd> | Tactical Combat Knife Melee |
 | <kbd>P</kbd> / <kbd>Esc</kbd> | Pause Combat |
 | <kbd>M</kbd> | Toggle Audio Mute |
 
