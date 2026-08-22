@@ -191,7 +191,11 @@ export class Game {
   private mouseDown = false;
   private mousePos = { x: -9999, y: -9999 };
   private prevMouse = { x: 0, y: 0 };
+  private lastMoveT = -9999;
+  private moveVX = 0;
+  private moveVY = 0;
   private lastLockTry = 0;
+  private lockHeldSince = 0;
   private onCtx = (e: Event) => e.preventDefault();
 
   private dirX = 1; private dirY = 0;
@@ -399,6 +403,9 @@ export class Game {
         const dy = clamp(e.clientY - this.prevMouse.y, -50, 50);
         this.p.a += dx * 0.0026;
         this.pitch = clamp(this.pitch - dy * 0.75, -pLim, pLim);
+        this.lastMoveT = this.now;
+        this.moveVX = e.clientX - this.prevMouse.x;
+        this.moveVY = e.clientY - this.prevMouse.y;
       }
     }
     this.prevMouse.x = e.clientX;
@@ -424,16 +431,24 @@ export class Game {
     const wasLocked = this.locked;
     this.locked = nowLocked;
     if (nowLocked) {
+      this.lockHeldSince = performance.now();
       if (this.mode === "play" && this.paused && !this.dead) {
         this.paused = false;
         this.last = performance.now();
         this.onEvent({ type: "resume" });
       }
     } else if (wasLocked && this.mode === "play" && !this.paused && !this.dead && !this.overSent) {
-      /* only auto-pause when the user really had capture and released it (Esc) —
-         environments where pointer lock never engages must never freeze the game */
-      this.paused = true;
-      this.onEvent({ type: "pause" });
+      const held = performance.now() - this.lockHeldSince;
+      if (held > 900) {
+        /* stable capture was released deliberately (Esc) → pause */
+        this.paused = true;
+        this.onEvent({ type: "pause" });
+      } else {
+        /* pointer lock flickered (environment can't hold it) → ignore it,
+           keep playing on relative mouse-look, and stop re-requesting the
+           lock for a while so the cursor stops popping back to the middle */
+        this.lastLockTry = performance.now() + 3500;
+      }
     }
   };
 
@@ -929,19 +944,22 @@ export class Game {
     }
 
     /* invisible edge assist (only when pointer lock is unavailable):
-       if the hidden cursor is pressed against the window edge and the OS
-       stops sending move events, the view keeps turning on its own so the
-       player can always spin all the way around — never stuck on a wall. */
-    if (!this.locked && this.mousePos.x >= 0) {
+       if the hidden cursor reaches the window edge while you are actively
+       pushing the mouse that way, the view keeps turning so you can spin
+       past 180°. It only runs while the mouse actually moved recently and
+       toward that edge — park the mouse anywhere and the view holds still
+       (no runaway circle-spin). */
+    if (!this.locked && this.mousePos.x >= 0 && this.now - this.lastMoveT < 0.35) {
       const vw = Math.max(1, window.innerWidth);
       const vh = Math.max(1, window.innerHeight);
       const m = 26;
       const cx = this.mousePos.x, cy = this.mousePos.y;
-      if (cx < m) this.p.a -= dt * 2.9 * (1 - Math.max(0, cx) / m);
-      else if (cx > vw - m) this.p.a += dt * 2.9 * (1 - Math.max(0, vw - cx) / m);
+      const recent = 1 - clamp((this.now - this.lastMoveT) / 0.35, 0, 1);
+      if (cx < m && this.moveVX < 0) this.p.a -= dt * 2.9 * (1 - Math.max(0, cx) / m) * recent;
+      else if (cx > vw - m && this.moveVX > 0) this.p.a += dt * 2.9 * (1 - Math.max(0, vw - cx) / m) * recent;
       const pLim = this.H * 0.3;
-      if (cy < m) this.pitch = clamp(this.pitch + dt * 150 * (1 - Math.max(0, cy) / m), -pLim, pLim);
-      else if (cy > vh - m) this.pitch = clamp(this.pitch - dt * 150 * (1 - Math.max(0, vh - cy) / m), -pLim, pLim);
+      if (cy < m && this.moveVY < 0) this.pitch = clamp(this.pitch + dt * 150 * (1 - Math.max(0, cy) / m) * recent, -pLim, pLim);
+      else if (cy > vh - m && this.moveVY > 0) this.pitch = clamp(this.pitch - dt * 150 * (1 - Math.max(0, vh - cy) / m) * recent, -pLim, pLim);
     }
 
     /* firing — works with or without pointer lock */
