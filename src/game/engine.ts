@@ -1014,29 +1014,34 @@ export class Game {
       for (const e of this.enemies) {
         const ex = e.x - p.x, ey = e.y - p.y;
         const t = ex * dx + ey * dy;
-        if (t > 0.3 && t < wallDist) {
-          const perp = Math.abs(ex * dy - ey * dx);
-          if (perp < hitR && t < bestT) {
-            const pr = this.project(e.x, e.y);
-            if (pr) {
-              const hgt = (this.H / pr.ty) * 0.86 * e.scale;
-              const wdt = hgt * (SW / SH);
-              const bottom = this.horizon() + eye * (this.H / pr.ty);
-              const top = bottom - hgt;
+        if (t > 0.25 && t < wallDist && t < bestT) {
+          const pr = this.project(e.x, e.y);
+          if (pr && pr.ty > 0.15) {
+            // 1. Z-Buffer occlusion check: wall in front takes the bullet
+            const col = Math.floor(clamp(aimScreenX, 0, this.W - 1));
+            if (this.zbuf[col] !== undefined && this.zbuf[col] < pr.ty - 0.08) {
+              continue;
+            }
 
-              // Validate true 3D screen hit: crosshair must align with the visible enemy sprite
-              const horizMargin = Math.max(wdt * 0.55, 14);
-              const vertMargin = Math.max(hgt * 0.12, 10);
+            const hgt = (this.H / pr.ty) * 0.86 * e.scale;
+            const wdt = hgt * (SW / SH);
+            const bottom = this.horizon() + eye * (this.H / pr.ty);
+            const top = bottom - hgt;
 
-              const inHoriz = Math.abs(aimScreenX - pr.sx) <= horizMargin;
-              const inVert = aimScreenY >= top - vertMargin && aimScreenY <= bottom + vertMargin;
+            // 2. Strict vertical bounds: Must be within [top, bottom]
+            const inVert = aimScreenY >= top && aimScreenY <= bottom;
+            if (!inVert) continue;
 
-              if (inHoriz && inVert) {
-                best = e;
-                bestT = t;
-                bestHead = aimScreenY <= top + hgt * 0.28;
-                bestHitY = clamp(aimScreenY, top + 2, bottom - 2);
-              }
+            // 3. Strict horizontal silhouette: Head (top 24%) is narrower than Torso
+            const isHead = aimScreenY <= top + hgt * 0.24;
+            const maxHalfW = isHead ? wdt * 0.32 : wdt * 0.44;
+            const inHoriz = Math.abs(aimScreenX - pr.sx) <= maxHalfW;
+
+            if (inHoriz) {
+              best = e;
+              bestT = t;
+              bestHead = isHead;
+              bestHitY = clamp(aimScreenY, top + 1, bottom - 1);
             }
           }
         }
