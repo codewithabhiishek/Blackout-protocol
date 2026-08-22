@@ -479,6 +479,7 @@ export class Game {
     document.addEventListener("mouseup", this.onMouseUp);
     document.addEventListener("pointerlockchange", this.onPlc);
     window.addEventListener("blur", this.onBlur);
+    window.addEventListener("focus", this.onFocus);
     this.canvas.addEventListener("contextmenu", this.onCtx);
     document.addEventListener("wheel", this.onWheel, { passive: false });
 
@@ -519,6 +520,7 @@ export class Game {
     document.removeEventListener("mouseup", this.onMouseUp);
     document.removeEventListener("pointerlockchange", this.onPlc);
     window.removeEventListener("blur", this.onBlur);
+    window.removeEventListener("focus", this.onFocus);
     this.canvas.removeEventListener("contextmenu", this.onCtx);
     document.removeEventListener("wheel", this.onWheel);
     sfx.stopAmbient();
@@ -548,14 +550,19 @@ export class Game {
     this.enemies = []; this.pickups = []; this.parts = []; this.tracers = [];
     this.corpses = []; this.dmgDirs = [];
     this.decals = []; this.floaters = []; this.smoke = [];
+    this.keys.clear();
+    this.mouseDown = false;
     this.aimDownSights = false;
     this.zoomT = 0;
+    this.lookDX = 0;
+    this.lookDY = 0;
+    this.moveVX = 0;
+    this.moveVY = 0;
     this.wave = 0; this.waveActive = false; this.waveDelay = 2.0;
     this.emergencyDropCd = 0;
     this.dead = false; this.deathT = 0; this.overSent = false;
     this.paused = false; this.mode = "play";
     this.startTime = performance.now();
-    this.mouseDown = false;
     this.dust = [];
     for (let i = 0; i < 46; i++) {
       this.dust.push({
@@ -589,6 +596,8 @@ export class Game {
   resumeGame() {
     if (this.mode !== "play" || !this.paused || this.dead) return;
     this.paused = false;
+    this.keys.clear();
+    this.mouseDown = false;
     this.last = performance.now();
     this.onEvent({ type: "resume" });
     this.requestLock();
@@ -603,8 +612,14 @@ export class Game {
     this.pickups = [];
     this.parts = [];
     this.tracers = [];
+    this.keys.clear();
+    this.mouseDown = false;
     this.aimDownSights = false;
     this.zoomT = 0;
+    this.lookDX = 0;
+    this.lookDY = 0;
+    this.moveVX = 0;
+    this.moveVY = 0;
     sfx.stopAmbient();
     if (document.pointerLockElement === this.canvas) document.exitPointerLock();
   }
@@ -652,20 +667,21 @@ export class Game {
 
   private onKeyDown = (e: KeyboardEvent) => {
     if (["Space", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.code)) e.preventDefault();
-    this.keys.add(e.code);
-    if (e.code === "KeyF") this.toggleFullscreen();
-    if (e.code === "KeyZ") this.aimDownSights = !this.aimDownSights;
     if (this.mode === "play" && !this.paused && !this.dead) {
-      if (e.code === "KeyR") this.startReload();
-      if (e.code === "Space") this.tryJump();
-      if (e.code === "KeyC") this.crouchLock = !this.crouchLock;
-      if (e.code === "KeyV" || e.code === "KeyE") this.tryMelee();
-      if (e.code === "Digit1") this.switchWeapon(0);
-      if (e.code === "Digit2") this.switchWeapon(1);
-      if (e.code === "Digit3") this.switchWeapon(2);
-      if (e.code === "KeyQ") this.switchWeapon((this.wIdx + 1) % WEAPONS.length);
+      this.keys.add(e.code);
+      if (e.key) this.keys.add(e.key.toLowerCase());
+      if (e.code === "KeyR" || e.key === "r" || e.key === "R") this.startReload();
+      if (e.code === "Space" || e.key === " ") this.tryJump();
+      if (e.code === "KeyC" || e.key === "c" || e.key === "C") this.crouchLock = !this.crouchLock;
+      if (e.code === "KeyV" || e.code === "KeyE" || e.key === "v" || e.key === "e") this.tryMelee();
+      if (e.code === "Digit1" || e.key === "1") this.switchWeapon(0);
+      if (e.code === "Digit2" || e.key === "2") this.switchWeapon(1);
+      if (e.code === "Digit3" || e.key === "3") this.switchWeapon(2);
+      if (e.code === "KeyQ" || e.key === "q" || e.key === "Q") this.switchWeapon((this.wIdx + 1) % WEAPONS.length);
     }
-    if (e.code === "KeyP" && this.mode === "play" && !this.dead) {
+    if (e.code === "KeyF" || e.key === "f" || e.key === "F") this.toggleFullscreen();
+    if (e.code === "KeyZ" || e.key === "z" || e.key === "Z") this.aimDownSights = !this.aimDownSights;
+    if ((e.code === "KeyP" || e.key === "p" || e.key === "P") && this.mode === "play" && !this.dead) {
       if (this.paused) this.resumeGame();
       else if (this.locked) document.exitPointerLock();
       else {
@@ -675,11 +691,12 @@ export class Game {
     }
     /* dev-only aim debugger — hidden in normal play */
     if (e.code === "Backquote") this.debugAim = !this.debugAim;
-    if (e.code === "KeyM") this.toggleMute();
+    if (e.code === "KeyM" || e.key === "m" || e.key === "M") this.toggleMute();
   };
 
   private onKeyUp = (e: KeyboardEvent) => {
     this.keys.delete(e.code);
+    if (e.key) this.keys.delete(e.key.toLowerCase());
   };
 
   private onMouseMove = (e: MouseEvent) => {
@@ -778,6 +795,18 @@ export class Game {
     this.keys.clear();
     this.mouseDown = false;
     this.aimDownSights = false;
+    this.lookDX = 0;
+    this.lookDY = 0;
+    this.moveVX = 0;
+    this.moveVY = 0;
+  };
+
+  private onFocus = () => {
+    this.keys.clear();
+    this.lookDX = 0;
+    this.lookDY = 0;
+    this.moveVX = 0;
+    this.moveVY = 0;
   };
 
   /* ---------------------------- helpers ---------------------------- */
@@ -1617,9 +1646,14 @@ export class Game {
     if (crouchTarget === 0 && this.crouchT < 0.01) this.crouchT = 0;
 
     /* player movement */
-    const f = (k.has("KeyW") || k.has("ArrowUp") ? 1 : 0) - (k.has("KeyS") || k.has("ArrowDown") ? 1 : 0);
-    const r = (k.has("KeyD") || k.has("ArrowRight") ? 1 : 0) - (k.has("KeyA") || k.has("ArrowLeft") ? 1 : 0);
-    const sprinting = (k.has("ShiftLeft") || k.has("ShiftRight")) && f > 0 && this.crouchT < 0.4;
+    const f =
+      (k.has("KeyW") || k.has("w") || k.has("ArrowUp") ? 1 : 0) -
+      (k.has("KeyS") || k.has("s") || k.has("ArrowDown") ? 1 : 0);
+    const r =
+      (k.has("KeyD") || k.has("d") || k.has("ArrowRight") ? 1 : 0) -
+      (k.has("KeyA") || k.has("a") || k.has("ArrowLeft") ? 1 : 0);
+    const sprinting =
+      (k.has("ShiftLeft") || k.has("ShiftRight") || k.has("shift")) && f > 0 && this.crouchT < 0.4;
     const speed = (sprinting ? 4.5 : 2.9) * (1 - 0.45 * this.crouchT);
     let mx = this.dirX * f + -Math.sin(this.p.a) * r;
     let my = this.dirY * f + Math.cos(this.p.a) * r;
@@ -1665,13 +1699,15 @@ export class Game {
       p.grounded = false;
     }
 
-    /* enemies push player */
+    /* enemies push player smoothly with delta-time */
     for (const e of this.enemies) {
       const dx = p.x - e.x, dy = p.y - e.y;
       const d = Math.hypot(dx, dy);
       if (d < 0.62 && d > 0.001) {
-        p.x += (dx / d) * (0.62 - d);
-        p.y += (dy / d) * (0.62 - d);
+        const pushForce = Math.min(2.0, (0.62 - d) * 3.0) * dt;
+        const res = this.resolveCollision(p.x + (dx / d) * pushForce, p.y + (dy / d) * pushForce, 0.22);
+        p.x = res.x;
+        p.y = res.y;
       }
     }
 
