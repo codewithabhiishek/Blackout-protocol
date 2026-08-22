@@ -27,7 +27,6 @@ export interface HudData {
   reloading: boolean;
   weapon: string;
   muted: boolean;
-  locked: boolean;
 }
 
 export interface OverStats {
@@ -375,12 +374,22 @@ export class Game {
     this.mousePos.x = e.clientX;
     this.mousePos.y = e.clientY;
     if (this.mode === "play" && !this.paused && !this.dead) {
+      const pLim = this.H * 0.3;
       if (this.locked) {
-        this.p.a += e.movementX * 0.0024;
-        this.pitch = clamp(this.pitch - e.movementY * 0.7, -this.H * 0.3, this.H * 0.3);
+        /* true pointer-lock mouse look */
+        this.p.a += e.movementX * 0.0026;
+        this.pitch = clamp(this.pitch - e.movementY * 0.75, -pLim, pLim);
+      } else {
+        /* relative mouse look without pointer lock:
+           moving the mouse itself turns the view — same feel, no cursor */
+        const dx = clamp(e.clientX - this.prevMouse.x, -50, 50);
+        const dy = clamp(e.clientY - this.prevMouse.y, -50, 50);
+        this.p.a += dx * 0.0026;
+        this.pitch = clamp(this.pitch - dy * 0.75, -pLim, pLim);
       }
-      /* cursor steering (no pointer lock needed) runs in update() */
     }
+    this.prevMouse.x = e.clientX;
+    this.prevMouse.y = e.clientY;
   };
 
   private onMouseDown = (e: MouseEvent) => {
@@ -494,7 +503,6 @@ export class Game {
       reloading: this.p.reloading,
       weapon: "PHANTOM MK-IV",
       muted: sfx.muted,
-      locked: this.locked,
     });
   }
 
@@ -814,25 +822,20 @@ export class Game {
       }
     }
 
-    /* cursor steering (fallback when pointer lock is unavailable):
-       the view turns toward wherever the cursor sits. Center = steady,
-       further out = faster, pinned at the edge = continuous full turn —
-       so you always look around with just the cursor. */
+    /* invisible edge assist (only when pointer lock is unavailable):
+       if the hidden cursor is pressed against the window edge and the OS
+       stops sending move events, the view keeps turning on its own so the
+       player can always spin all the way around — never stuck on a wall. */
     if (!this.locked && this.mousePos.x >= 0) {
       const vw = Math.max(1, window.innerWidth);
       const vh = Math.max(1, window.innerHeight);
-      const ox = (this.mousePos.x - vw / 2) / (vw / 2);
-      const oy = (this.mousePos.y - vh / 2) / (vh / 2);
-      const dead = 0.09;
-      const steer = (v: number) => {
-        const av = Math.min(1, Math.abs(v));
-        if (av < dead) return 0;
-        const s = (av - dead) / (1 - dead);
-        return Math.sign(v) * s * s;
-      };
-      this.p.a += steer(ox) * dt * 3.5;
+      const m = 26;
+      const cx = this.mousePos.x, cy = this.mousePos.y;
+      if (cx < m) this.p.a -= dt * 2.9 * (1 - Math.max(0, cx) / m);
+      else if (cx > vw - m) this.p.a += dt * 2.9 * (1 - Math.max(0, vw - cx) / m);
       const pLim = this.H * 0.3;
-      this.pitch = clamp(this.pitch - steer(oy) * dt * 270, -pLim, pLim);
+      if (cy < m) this.pitch = clamp(this.pitch + dt * 150 * (1 - Math.max(0, cy) / m), -pLim, pLim);
+      else if (cy > vh - m) this.pitch = clamp(this.pitch - dt * 150 * (1 - Math.max(0, vh - cy) / m), -pLim, pLim);
     }
 
     /* firing — works with or without pointer lock */
