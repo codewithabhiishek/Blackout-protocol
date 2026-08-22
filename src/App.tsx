@@ -5,9 +5,9 @@ import { sfx } from "./game/audio";
 /* ------------------------------------------------------------------ */
 
 const HUD0: HudData = {
-  hp: 100, mag: 30, magSize: 30, score: 0, kills: 0, wave: 1,
-  enemies: 0, mult: 1, rapid: 0, reloading: false,
-  weapon: "PHANTOM MK-IV", weaponIdx: 0, muted: false, crouched: false,
+  hp: 100, mag: 24, magSize: 24, score: 0, kills: 0, wave: 1,
+  enemies: 0, mult: 1, rapid: 0, reloading: false, crouched: false,
+  weapon: "PHANTOM MK-IV", weaponIdx: 0, fireMode: "SEMI-AUTO", muted: false,
 };
 
 const WEAPON_SLOTS = [

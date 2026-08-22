@@ -213,7 +213,6 @@ export class Game {
   private swayY = 0;
   private landDip = 0;
   /* juice */
-  private grain: HTMLCanvasElement | null = null;
   private corpses: Array<{ x: number; y: number; kind: EnemyKind; t: number; scale: number }> = [];
   private dmgDirs: Array<{ ang: number; t: number }> = [];
   private pitch = 0;
@@ -1616,14 +1615,6 @@ export class Game {
       }
     }
 
-    /* film grain */
-    const gr = this.grainCanvas();
-    const gsx = Math.floor(Math.random() * 64);
-    const gsy = Math.floor(Math.random() * 64);
-    ctx.globalAlpha = 0.05;
-    ctx.drawImage(gr, gsx, gsy, 64, 64, 0, 0, W, H);
-    ctx.globalAlpha = 1;
-
     /* damage / low hp overlay */
     const lowPulse = p.hp < 30 && !this.dead ? 0.16 + 0.12 * Math.sin(this.now * 6.5) : 0;
     const dmgA = clamp(this.dmgFlash * 0.5 + lowPulse, 0, 0.75);
@@ -1681,26 +1672,6 @@ export class Game {
       ctx.fillStyle = `rgba(255,176,46,${(0.35 + 0.65 * a).toFixed(3)})`;
       ctx.fillText(`×${this.mult()}`, cx, cy + H * 0.075);
     }
-  }
-
-  private grainCanvas(): HTMLCanvasElement {
-    if (!this.grain) {
-      const c = document.createElement("canvas");
-      c.width = 128;
-      c.height = 128;
-      const g = c.getContext("2d")!;
-      const img = g.createImageData(128, 128);
-      for (let i = 0; i < img.data.length; i += 4) {
-        const v = Math.floor(Math.random() * 255);
-        img.data[i] = v;
-        img.data[i + 1] = v;
-        img.data[i + 2] = v;
-        img.data[i + 3] = 255;
-      }
-      g.putImageData(img, 0, 0);
-      this.grain = c;
-    }
-    return this.grain;
   }
 
   private crossLines(ctx: CanvasRenderingContext2D, cx: number, cy: number, gap: number, len: number) {
