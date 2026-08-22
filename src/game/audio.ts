@@ -131,6 +131,20 @@ class Sfx {
   step() {
     this.noise(0.045, 0.08, 680, 0.8);
   }
+  shootSmg() {
+    this.noise(0.065, 0.42, 1900, 0.7);
+    this.noise(0.04, 0.2, 4800, 1, 0, "highpass");
+    this.tone(220, 75, 0.07, "square", 0.2);
+  }
+  shootShotgun() {
+    this.noise(0.32, 0.6, 620, 0.6);
+    this.noise(0.09, 0.3, 2800, 1, 0, "highpass");
+    this.tone(105, 26, 0.3, "square", 0.42);
+  }
+  swap() {
+    this.noise(0.04, 0.22, 2600, 1, 0, "highpass");
+    this.noise(0.04, 0.22, 2100, 1, 0.09, "highpass");
+  }
   jump() {
     this.noise(0.12, 0.09, 900, 1);
     this.tone(170, 320, 0.13, "sine", 0.09);

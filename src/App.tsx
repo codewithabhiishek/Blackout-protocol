@@ -7,8 +7,14 @@ import { sfx } from "./game/audio";
 const HUD0: HudData = {
   hp: 100, mag: 30, magSize: 30, score: 0, kills: 0, wave: 1,
   enemies: 0, mult: 1, rapid: 0, reloading: false,
-  weapon: "PHANTOM MK-IV", muted: false, crouched: false,
+  weapon: "PHANTOM MK-IV", weaponIdx: 0, muted: false, crouched: false,
 };
+
+const WEAPON_SLOTS = [
+  { k: "1", short: "RIFLE" },
+  { k: "2", short: "SMG" },
+  { k: "3", short: "JUDGE-12" },
+];
 
 interface FeedItem { id: number; text: string; color: string }
 interface Banner { title: string; sub: string; n: number }
@@ -363,6 +369,20 @@ export default function App() {
 
           {/* weapon / ammo */}
           <div className="absolute bottom-5 right-5 text-right">
+            <div className="mb-2 flex justify-end gap-1.5">
+              {WEAPON_SLOTS.map((w, i) => (
+                <div
+                  key={w.k}
+                  className={`chamfer-sm border px-2.5 py-1 text-[10px] font-bold tracking-[0.18em] transition-colors duration-150 ${
+                    hud.weaponIdx === i
+                      ? "border-brass bg-brass/15 text-white"
+                      : "border-line bg-black/45 text-ghost/60"
+                  }`}
+                >
+                  <span className={hud.weaponIdx === i ? "text-brass" : "text-ghost/50"}>{w.k}</span>&ensp;{w.short}
+                </div>
+              ))}
+            </div>
             <div className="text-[11px] font-semibold tracking-[0.34em] text-ghost">{hud.weapon}</div>
             <div className="font-display text-7xl leading-none text-white tabular-nums">
               {String(hud.mag).padStart(2, "0")}
@@ -370,17 +390,19 @@ export default function App() {
             </div>
             {hud.reloading ? (
               <div className="anim-blink mt-1.5 text-sm font-bold tracking-[0.3em] text-brass">RELOADING</div>
-            ) : hud.mag <= 5 ? (
+            ) : hud.mag <= Math.max(1, Math.round(hud.magSize * 0.2)) ? (
               <div className="mt-1.5 text-sm font-bold tracking-[0.3em] text-blood">LOW AMMO — R</div>
             ) : (
-              <div className="mt-1.5 text-[12px] font-semibold tracking-[0.3em] text-ghost/70">FULL AUTO</div>
+              <div className="mt-1.5 text-[12px] font-semibold tracking-[0.3em] text-ghost/70">
+                {hud.weaponIdx === 2 ? "PUMP ACTION" : "FULL AUTO"}
+              </div>
             )}
           </div>
 
           {/* controls hint */}
           {screen === "play" && (
             <div className="anim-hint absolute bottom-5 left-1/2 -translate-x-1/2 whitespace-nowrap text-[13px] font-semibold tracking-[0.22em] text-ghost">
-              WASD MOVE&ensp;·&ensp;MOUSE AIM&ensp;·&ensp;LMB / RMB FIRE&ensp;·&ensp;R RELOAD&ensp;·&ensp;SHIFT SPRINT&ensp;·&ensp;P PAUSE
+              WASD MOVE&ensp;·&ensp;MOUSE AIM&ensp;·&ensp;LMB / RMB FIRE&ensp;·&ensp;1-3 WEAPONS&ensp;·&ensp;SPACE JUMP&ensp;·&ensp;C CROUCH&ensp;·&ensp;F KNIFE&ensp;·&ensp;R RELOAD
             </div>
           )}
 
@@ -480,6 +502,8 @@ export default function App() {
                   <Ctrl k="SPACE" label="JUMP" />
                   <Ctrl k="C / CTRL" label="CROUCH (TOGGLE)" />
                   <Ctrl k="F" label="KNIFE MELEE" />
+                  <Ctrl k="1 / 2 / 3" label="SWITCH WEAPON" />
+                  <Ctrl k="WHEEL / Q" label="CYCLE WEAPON" />
                   <Ctrl k="R" label="RELOAD" />
                   <Ctrl k="SHIFT" label="SPRINT" />
                   <Ctrl k="P / ESC" label="PAUSE" />

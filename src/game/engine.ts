@@ -27,6 +27,7 @@ export interface HudData {
   reloading: boolean;
   crouched: boolean;
   weapon: string;
+  weaponIdx: number;
   muted: boolean;
 }
 
@@ -115,6 +116,41 @@ const ENEMY_BASE: Record<EnemyKind, { hp: number; speed: number; scale: number; 
   heavy: { hp: 190, speed: 1.05, scale: 1.1, points: 300 },
 };
 
+/* ---------------------------- weapons ---------------------------- */
+
+export interface WeaponDef {
+  name: string; short: string;
+  mag: number; interval: number; auto: boolean;
+  dmgLo: number; dmgHi: number; pellets: number;
+  spread: number; recoil: number; shake: number; kick: number;
+  reload: number; range: number; flash: number;
+  sound: "rifle" | "smg" | "shotgun";
+}
+
+export const WEAPONS: WeaponDef[] = [
+  {
+    name: "PHANTOM MK-IV", short: "RIFLE",
+    mag: 30, interval: 0.115, auto: true,
+    dmgLo: 26, dmgHi: 38, pellets: 1,
+    spread: 0.011, recoil: 1, shake: 2.1, kick: 3.2,
+    reload: 1.5, range: 40, flash: 1, sound: "rifle",
+  },
+  {
+    name: "SCORPION PDW", short: "SMG",
+    mag: 40, interval: 0.062, auto: true,
+    dmgLo: 13, dmgHi: 20, pellets: 1,
+    spread: 0.021, recoil: 0.5, shake: 1.2, kick: 1.5,
+    reload: 1.2, range: 30, flash: 0.7, sound: "smg",
+  },
+  {
+    name: "JUDGE-12", short: "SHOTGUN",
+    mag: 6, interval: 0.85, auto: false,
+    dmgLo: 10, dmgHi: 16, pellets: 8,
+    spread: 0.085, recoil: 1.7, shake: 6, kick: 8,
+    reload: 2.1, range: 10, flash: 1.7, sound: "shotgun",
+  },
+];
+
 function normAngle(a: number): number {
   while (a > Math.PI) a -= Math.PI * 2;
   while (a < -Math.PI) a += Math.PI * 2;
@@ -156,11 +192,16 @@ export class Game {
 
   private p = {
     x: 10.5, y: 11.5, a: 0, hp: 100,
-    mag: 30, reloading: false, reloadT: 0,
+    reloading: false, reloadT: 0,
     chain: 0, chainT: 0, score: 0, kills: 0, shots: 0, hits: 0,
     rapidT: 0, bobT: 0, lastStep: 0,
     pz: 0, vz: 0, grounded: true,
   };
+  private wIdx = 0;
+  private mags = [30, 40, 6];
+  private swapT = 1;
+  private triggerReady = true;
+  private lockDisabled = false;
   private pitch = 0;
   private recoilPitch = 0;
   private shake = 0;
@@ -244,6 +285,7 @@ export class Game {
     document.addEventListener("pointerlockchange", this.onPlc);
     window.addEventListener("blur", this.onBlur);
     this.canvas.addEventListener("contextmenu", this.onCtx);
+    document.addEventListener("wheel", this.onWheel, { passive: false });
 
     this.last = performance.now();
     this.raf = requestAnimationFrame(this.tick);
@@ -260,6 +302,7 @@ export class Game {
     document.removeEventListener("pointerlockchange", this.onPlc);
     window.removeEventListener("blur", this.onBlur);
     this.canvas.removeEventListener("contextmenu", this.onCtx);
+    document.removeEventListener("wheel", this.onWheel);
     sfx.stopAmbient();
     if (document.pointerLockElement === this.canvas) document.exitPointerLock();
   }
@@ -269,7 +312,9 @@ export class Game {
   startGame() {
     const p = this.p;
     p.x = this.spawnX; p.y = this.spawnY; p.a = -Math.PI / 2;
-    p.hp = 100; p.mag = 30; p.reloading = false; p.reloadT = 0;
+    p.hp = 100; p.reloading = false; p.reloadT = 0;
+    this.wIdx = 0; this.mags = [WEAPONS[0].mag, WEAPONS[1].mag, WEAPONS[2].mag];
+    this.swapT = 1; this.triggerReady = true;
     p.chain = 0; p.chainT = 0; p.score = 0; p.kills = 0; p.shots = 0; p.hits = 0;
     p.rapidT = 0; p.bobT = 0;
     p.pz = 0; p.vz = 0; p.grounded = true;
@@ -298,6 +343,7 @@ export class Game {
   }
 
   requestLock() {
+    if (this.lockDisabled) return;
     const now = performance.now();
     if (now - this.lastLockTry < 1200) return;
     this.lastLockTry = now;
@@ -371,6 +417,10 @@ export class Game {
       if (e.code === "Space") this.tryJump();
       if (e.code === "KeyC") this.crouchLock = !this.crouchLock;
       if (e.code === "KeyF" || e.code === "KeyV") this.tryMelee();
+      if (e.code === "Digit1") this.switchWeapon(0);
+      if (e.code === "Digit2") this.switchWeapon(1);
+      if (e.code === "Digit3") this.switchWeapon(2);
+      if (e.code === "KeyQ") this.switchWeapon((this.wIdx + 1) % WEAPONS.length);
     }
     if (e.code === "KeyP" && this.mode === "play" && !this.dead) {
       if (this.paused) this.resumeGame();
@@ -419,6 +469,7 @@ export class Game {
       this.prevMouse.x = e.clientX;
       this.prevMouse.y = e.clientY;
       this.mouseDown = true;
+      this.triggerReady = true;
       if (this.mode === "play" && !this.locked && !this.paused && !this.dead) this.requestLock();
     }
   };
@@ -443,11 +494,16 @@ export class Game {
         /* stable capture was released deliberately (Esc) → pause */
         this.paused = true;
         this.onEvent({ type: "pause" });
-      } else {
-        /* pointer lock flickered (environment can't hold it) → ignore it,
-           keep playing on relative mouse-look, and stop re-requesting the
-           lock for a while so the cursor stops popping back to the middle */
-        this.lastLockTry = performance.now() + 3500;
+      } else if (!this.lockDisabled) {
+        /* pointer lock flickered (environment can't hold it). Permanently
+           give up on it: never request it again, so the cursor can never
+           be hijacked back to the middle. Relative mouse-look takes over. */
+        this.lockDisabled = true;
+        this.onEvent({
+          type: "feed",
+          text: "CURSOR LOCK DISABLED — STEADY AIM ENGAGED",
+          color: "#9acd32",
+        });
       }
     }
   };
@@ -528,10 +584,11 @@ export class Game {
   }
 
   private pushHud() {
+    const def = WEAPONS[this.wIdx];
     this.onHud({
       hp: Math.max(0, Math.ceil(this.p.hp)),
-      mag: this.p.mag,
-      magSize: 30,
+      mag: this.mags[this.wIdx],
+      magSize: def.mag,
       score: this.p.score,
       kills: this.p.kills,
       wave: Math.max(1, this.wave),
@@ -540,7 +597,8 @@ export class Game {
       rapid: Math.max(0, this.p.rapidT),
       reloading: this.p.reloading,
       crouched: this.crouchT > 0.5,
-      weapon: "PHANTOM MK-IV",
+      weapon: def.name,
+      weaponIdx: this.wIdx,
       muted: sfx.muted,
     });
   }
@@ -549,11 +607,31 @@ export class Game {
 
   private startReload() {
     const p = this.p;
-    if (p.reloading || p.mag >= 30) return;
+    const def = WEAPONS[this.wIdx];
+    if (p.reloading || this.mags[this.wIdx] >= def.mag) return;
     p.reloading = true;
     p.reloadT = 0;
     sfx.reload();
   }
+
+  private switchWeapon(i: number) {
+    if (i === this.wIdx || i < 0 || i >= WEAPONS.length) return;
+    if (this.mode !== "play" || this.paused || this.dead) return;
+    this.wIdx = i;
+    this.p.reloading = false;
+    this.p.reloadT = 0;
+    this.swapT = 0;
+    this.fireT = Math.max(this.fireT, 0.3);
+    this.triggerReady = true;
+    sfx.swap();
+  }
+
+  private onWheel = (e: WheelEvent) => {
+    if (this.mode !== "play" || this.paused || this.dead) return;
+    e.preventDefault();
+    const dir = e.deltaY > 0 ? 1 : -1;
+    this.switchWeapon((this.wIdx + dir + WEAPONS.length) % WEAPONS.length);
+  };
 
   private tryJump() {
     if (this.p.grounded) {
@@ -605,15 +683,19 @@ export class Game {
     const p = this.p;
     const s = this.H / 430;
     const moving = this.moveFactor();
+    const def = WEAPONS[this.wIdx];
+    const rt = p.reloading ? Math.sin(Math.PI * clamp(p.reloadT / def.reload, 0, 1)) : 0;
+    const swap = Math.sin((1 - this.swapT) * Math.PI * 0.5) * 70;
     const gx = this.W * 0.60 + Math.sin(p.bobT) * 6 * moving;
     const gy = this.H + 10 + Math.abs(Math.cos(p.bobT)) * 7 * moving
       + this.recoil * 15
       + this.crouchT * 24 * s
       + p.pz * 55 * s
-      + (p.reloading ? Math.sin(Math.PI * clamp(p.reloadT / 1.5, 0, 1)) * 85 : 0);
+      + rt * 85
+      + swap;
     const sprinting = this.keys.has("ShiftLeft") || this.keys.has("ShiftRight");
     const rot = 0.42 + this.recoil * 0.1 + this.crouchT * 0.05
-      + (p.reloading ? Math.sin(Math.PI * clamp(p.reloadT / 1.5, 0, 1)) * 0.5 : 0)
+      + rt * 0.5
       + (sprinting && moving > 0.4 ? 0.1 : 0);
     return { gx, gy, rot, s };
   }
@@ -627,65 +709,78 @@ export class Game {
 
   private fire() {
     const p = this.p;
-    p.mag--;
+    const def = WEAPONS[this.wIdx];
+    this.mags[this.wIdx]--;
     p.shots++;
-    this.recoil = 1;
+    this.recoil = def.recoil;
     this.muzzleT = 0.055;
-    this.shake = Math.min(10, this.shake + 2.1);
-    this.recoilPitch -= 3.2;
-    this.fireT = p.rapidT > 0 ? 0.068 : 0.115;
-    sfx.shoot();
+    this.shake = Math.min(14, this.shake + def.shake);
+    this.recoilPitch -= def.kick;
+    this.fireT = def.interval * (p.rapidT > 0 ? 0.62 : 1);
+    if (def.sound === "smg") sfx.shootSmg();
+    else if (def.sound === "shotgun") sfx.shootShotgun();
+    else sfx.shoot();
 
     const pose = this.gunPose();
     this.parts.push({
       x: pose.gx + Math.cos(pose.rot) * 40 * pose.s,
       y: pose.gy + Math.sin(pose.rot) * 40 * pose.s - 20 * pose.s,
       vx: 90 + Math.random() * 90, vy: -160 - Math.random() * 60,
-      life: 0.75, maxLife: 0.75, size: 2.4, color: "#d8a437", grav: 620, add: false,
+      life: 0.75, maxLife: 0.75,
+      size: def.sound === "shotgun" ? 3.2 : 2.4,
+      color: def.sound === "shotgun" ? "#c23a2a" : "#d8a437",
+      grav: 620, add: false,
     });
 
     const sprinting = this.keys.has("ShiftLeft") || this.keys.has("ShiftRight");
     const airborne = this.p.grounded ? 0 : 0.02;
     const spread = Math.max(
       0.005,
-      0.011 + this.moveFactor() * 0.011 + (sprinting ? 0.018 : 0) + this.recoil * 0.006 + airborne - this.crouchT * 0.007
+      def.spread + this.moveFactor() * def.spread * 0.9 + (sprinting ? 0.018 : 0)
+        + this.recoil * 0.004 + airborne - this.crouchT * def.spread * 0.5
     );
-    const ang = p.a + (Math.random() - 0.5) * 2 * spread;
-    const dx = Math.cos(ang), dy = Math.sin(ang);
-    const wallDist = this.castGrid(p.x, p.y, dx, dy, 40);
-
     /* slightly generous hit detection when aiming without pointer lock */
     const hitR = this.locked ? 0.36 : 0.46;
-    let best: Enemy | null = null;
-    let bestT = Infinity;
-    for (const e of this.enemies) {
-      const ex = e.x - p.x, ey = e.y - p.y;
-      const t = ex * dx + ey * dy;
-      if (t > 0.3 && t < wallDist) {
-        const perp = Math.abs(ex * dy - ey * dx);
-        if (perp < hitR && t < bestT) { best = e; bestT = t; }
+    let anyHit = false;
+
+    for (let pel = 0; pel < def.pellets; pel++) {
+      const ang = p.a + (Math.random() - 0.5) * 2 * spread;
+      const dx = Math.cos(ang), dy = Math.sin(ang);
+      const wallDist = Math.min(this.castGrid(p.x, p.y, dx, dy, def.range), def.range);
+
+      let best: Enemy | null = null;
+      let bestT = Infinity;
+      for (const e of this.enemies) {
+        const ex = e.x - p.x, ey = e.y - p.y;
+        const t = ex * dx + ey * dy;
+        if (t > 0.3 && t < wallDist) {
+          const perp = Math.abs(ex * dy - ey * dx);
+          if (perp < hitR && t < bestT) { best = e; bestT = t; }
+        }
+      }
+
+      if (best) {
+        anyHit = true;
+        p.hits++;
+        best.hp -= def.dmgLo + Math.random() * (def.dmgHi - def.dmgLo);
+        best.flash = 0.1;
+        const pr = this.project(best.x, best.y);
+        if (pr) {
+          const eye = this.eyeH();
+          const hgt = (this.H / pr.ty) * 0.86 * best.scale;
+          const bottom = this.horizon() + eye * (this.H / pr.ty);
+          this.burst(pr.sx, bottom - hgt * (0.35 + Math.random() * 0.35), def.pellets > 1 ? 4 : 8, ["#c22f24", "#8a1f1a", "#e05548"], 150, 320, false);
+        }
+        if (best.hp <= 0) this.killEnemy(best);
+      } else if (pel === 0 || Math.random() < 0.25) {
+        const rel = normAngle(ang - p.a);
+        const col = clamp(Math.round(((Math.tan(rel) / 0.66 + 1) / 2) * this.W), 0, this.W - 1);
+        this.burst(col, this.horizon() + (Math.random() - 0.5) * this.H * 0.2, 5, ["#ffd28a", "#ffb02e", "#fff2c8"], 90, 0, true);
       }
     }
-
-    if (best) {
-      p.hits++;
-      const dmg = 26 + Math.random() * 12;
-      best.hp -= dmg;
-      best.flash = 0.1;
+    if (anyHit) {
       this.hitMark = { t: 0.16, kill: false };
       sfx.hit();
-      const pr = this.project(best.x, best.y);
-      if (pr) {
-        const eye = this.eyeH();
-        const hgt = (this.H / pr.ty) * 0.86 * best.scale;
-        const bottom = this.horizon() + eye * (this.H / pr.ty);
-        this.burst(pr.sx, bottom - hgt * (0.35 + Math.random() * 0.35), 8, ["#c22f24", "#8a1f1a", "#e05548"], 150, 320, false);
-      }
-      if (best.hp <= 0) this.killEnemy(best);
-    } else {
-      const rel = normAngle(ang - p.a);
-      const col = clamp(Math.round(((Math.tan(rel) / 0.66 + 1) / 2) * this.W), 0, this.W - 1);
-      this.burst(col, this.horizon() + (Math.random() - 0.5) * this.H * 0.2, 6, ["#ffd28a", "#ffb02e", "#fff2c8"], 90, 0, true);
     }
   }
 
@@ -719,7 +814,7 @@ export class Game {
     sfx.kill();
     this.onEvent({
       type: "feed",
-      text: `${KILL_WORDS[Math.floor(Math.random() * KILL_WORDS.length)]}  +${gained}`,
+      text: `${KILL_WORDS[Math.floor(Math.random() * KILL_WORDS.length)]} · ${WEAPONS[this.wIdx].short}  +${gained}`,
       color: "#ffb02e",
     });
     const pr = this.project(e.x, e.y);
@@ -964,9 +1059,14 @@ export class Game {
 
     /* firing — works with or without pointer lock */
     this.fireT -= dt;
-    if (this.mouseDown && !p.reloading) {
-      if (p.mag > 0) {
-        if (this.fireT <= 0) this.fire();
+    this.swapT = Math.min(1, this.swapT + dt * 3.4);
+    const wdef = WEAPONS[this.wIdx];
+    if (this.mouseDown && !p.reloading && this.swapT > 0.55) {
+      if (this.mags[this.wIdx] > 0) {
+        if (this.fireT <= 0 && (wdef.auto || this.triggerReady)) {
+          this.fire();
+          if (!wdef.auto) this.triggerReady = false;
+        }
       } else if (this.fireT <= 0) {
         sfx.empty();
         this.startReload();
@@ -975,9 +1075,9 @@ export class Game {
     }
     if (p.reloading) {
       p.reloadT += dt;
-      if (p.reloadT >= 1.5) {
+      if (p.reloadT >= wdef.reload) {
         p.reloading = false;
-        p.mag = 30;
+        this.mags[this.wIdx] = wdef.mag;
         sfx.reloadDone();
       }
     }
@@ -1427,69 +1527,19 @@ export class Game {
     ctx.rotate(pose.rot);
     ctx.scale(s, s);
 
-    const rt = this.p.reloading ? Math.sin(Math.PI * clamp(this.p.reloadT / 1.5, 0, 1)) : 0;
+    const def = WEAPONS[this.wIdx];
+    const rt = this.p.reloading ? Math.sin(Math.PI * clamp(this.p.reloadT / def.reload, 0, 1)) : 0;
 
-    /* stock */
-    ctx.fillStyle = "#171b20";
-    ctx.fillRect(84, -10, 46, 22);
-    ctx.fillStyle = "#0d0f12";
-    ctx.fillRect(124, -12, 8, 26);
-    /* receiver */
-    ctx.fillStyle = "#1c2026";
-    ctx.fillRect(8, -14, 78, 28);
-    ctx.fillStyle = "#0e1013";
-    ctx.fillRect(30, -8, 22, 8);
-    ctx.fillStyle = "rgba(255,176,46,0.85)";
-    ctx.fillRect(12, -3, 42, 3);
-    /* carry handle sight */
-    ctx.fillStyle = "#23272e";
-    ctx.fillRect(18, -26, 36, 12);
-    ctx.fillStyle = "#0b0d0f";
-    ctx.fillRect(30, -23, 10, 6);
-    /* handguard */
-    ctx.fillStyle = "#2b3038";
-    ctx.fillRect(-72, -11, 82, 22);
-    ctx.fillStyle = "#171a20";
-    ctx.fillRect(-62, -6, 14, 4);
-    ctx.fillRect(-40, -6, 14, 4);
-    ctx.fillRect(-18, -6, 14, 4);
-    /* barrel */
-    ctx.fillStyle = "#23272e";
-    ctx.fillRect(-190, -7, 120, 13);
-    ctx.fillStyle = "#14171c";
-    ctx.fillRect(-202, -10, 16, 18);
-    ctx.fillStyle = "#2b3038";
-    ctx.fillRect(-180, -21, 5, 14);
-    /* magazine (drops on reload) */
-    ctx.save();
-    ctx.translate(38, 12);
-    ctx.rotate(0.22 + rt * 0.5);
-    ctx.fillStyle = "#262b31";
-    ctx.fillRect(-9, 0 + rt * 46, 20, 34);
-    ctx.fillStyle = "#14171c";
-    ctx.fillRect(-9, 26 + rt * 46, 20, 6);
-    ctx.restore();
-    /* grip */
-    ctx.save();
-    ctx.translate(78, 10);
-    ctx.rotate(-0.28);
-    ctx.fillStyle = "#1a1e23";
-    ctx.fillRect(-7, 0, 15, 30);
-    ctx.restore();
-    /* hands */
-    ctx.fillStyle = "#20262b";
-    ctx.beginPath();
-    ctx.arc(-44, 9, 12, 0, Math.PI * 2);
-    ctx.arc(60, 20, 11, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = "rgba(255,255,255,0.06)";
-    ctx.fillRect(-72, -11, 158, 3);
+    if (this.wIdx === 0) this.drawRifleParts(ctx, rt);
+    else if (this.wIdx === 1) this.drawSmgParts(ctx, rt);
+    else this.drawShotgunParts(ctx, rt);
 
     /* muzzle flash */
     if (this.muzzleT > 0) {
       ctx.globalCompositeOperation = "lighter";
-      const mx = -206, my = -1;
-      const r1 = 26 + Math.random() * 10;
+      const mx = this.wIdx === 1 ? -138 : this.wIdx === 2 ? -204 : -206;
+      const my = -1;
+      const r1 = (26 + Math.random() * 10) * def.flash;
       const fg = ctx.createRadialGradient(mx, my, 0, mx, my, r1);
       fg.addColorStop(0, "rgba(255,247,214,0.98)");
       fg.addColorStop(0.35, "rgba(255,176,46,0.8)");
@@ -1498,11 +1548,12 @@ export class Game {
       ctx.fillRect(mx - r1, my - r1, r1 * 2, r1 * 2);
       ctx.fillStyle = "rgba(255,230,160,0.9)";
       ctx.beginPath();
-      for (let i = 0; i < 4; i++) {
-        const a = (i * Math.PI) / 2 + Math.random() * 0.3;
+      const spikes = this.wIdx === 2 ? 6 : 4;
+      for (let i = 0; i < spikes; i++) {
+        const a = (i * Math.PI * 2) / spikes + Math.random() * 0.3;
         ctx.moveTo(mx, my);
         ctx.lineTo(mx + Math.cos(a) * r1 * 1.4, my + Math.sin(a) * r1 * 1.4);
-        ctx.lineTo(mx + Math.cos(a + 0.35) * r1 * 0.5, my + Math.sin(a + 0.35) * r1 * 0.5);
+        ctx.lineTo(mx + Math.cos(a + 0.3) * r1 * 0.5, my + Math.sin(a + 0.3) * r1 * 0.5);
       }
       ctx.fill();
       ctx.globalCompositeOperation = "source-over";
@@ -1541,6 +1592,193 @@ export class Game {
       ctx.fill();
       ctx.restore();
     }
+  }
+
+  /* ---------------------------- viewmodels ---------------------------- */
+
+  private drawRifleParts(ctx: CanvasRenderingContext2D, rt: number) {
+    /* stock */
+    ctx.fillStyle = "#171b20";
+    ctx.fillRect(84, -10, 46, 22);
+    ctx.fillStyle = "#0d0f12";
+    ctx.fillRect(124, -12, 8, 26);
+    /* receiver */
+    ctx.fillStyle = "#1c2026";
+    ctx.fillRect(8, -14, 78, 28);
+    ctx.fillStyle = "#0e1013";
+    ctx.fillRect(30, -8, 22, 8);
+    ctx.fillStyle = "rgba(255,176,46,0.85)";
+    ctx.fillRect(12, -3, 42, 3);
+    /* carry handle sight */
+    ctx.fillStyle = "#23272e";
+    ctx.fillRect(18, -26, 36, 12);
+    ctx.fillStyle = "#0b0d0f";
+    ctx.fillRect(30, -23, 10, 6);
+    /* handguard */
+    ctx.fillStyle = "#2b3038";
+    ctx.fillRect(-72, -11, 82, 22);
+    ctx.fillStyle = "#171a20";
+    ctx.fillRect(-62, -6, 14, 4);
+    ctx.fillRect(-40, -6, 14, 4);
+    ctx.fillRect(-18, -6, 14, 4);
+    /* barrel */
+    ctx.fillStyle = "#23272e";
+    ctx.fillRect(-190, -7, 120, 13);
+    ctx.fillStyle = "#14171c";
+    ctx.fillRect(-202, -10, 16, 18);
+    ctx.fillStyle = "#2b3038";
+    ctx.fillRect(-180, -21, 5, 14);
+    /* magazine (drops on reload) */
+    ctx.save();
+    ctx.translate(38, 12);
+    ctx.rotate(0.22 + rt * 0.5);
+    ctx.fillStyle = "#262b31";
+    ctx.fillRect(-9, rt * 46, 20, 34);
+    ctx.fillStyle = "#14171c";
+    ctx.fillRect(-9, 26 + rt * 46, 20, 6);
+    ctx.restore();
+    /* grip */
+    ctx.save();
+    ctx.translate(78, 10);
+    ctx.rotate(-0.28);
+    ctx.fillStyle = "#1a1e23";
+    ctx.fillRect(-7, 0, 15, 30);
+    ctx.restore();
+    /* hands */
+    ctx.fillStyle = "#20262b";
+    ctx.beginPath();
+    ctx.arc(-44, 9, 12, 0, Math.PI * 2);
+    ctx.arc(60, 20, 11, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "rgba(255,255,255,0.06)";
+    ctx.fillRect(-72, -11, 158, 3);
+  }
+
+  private drawSmgParts(ctx: CanvasRenderingContext2D, rt: number) {
+    /* wire stock */
+    ctx.save();
+    ctx.translate(80, 0);
+    ctx.rotate(0.28);
+    ctx.fillStyle = "#171a20";
+    ctx.fillRect(0, -3, 56, 7);
+    ctx.fillRect(48, -3, 7, 22);
+    ctx.restore();
+    /* compact receiver */
+    ctx.fillStyle = "#1e2228";
+    ctx.fillRect(10, -13, 70, 26);
+    ctx.fillStyle = "#0e1013";
+    ctx.fillRect(24, -7, 20, 7);
+    ctx.fillStyle = "rgba(154,205,50,0.8)";
+    ctx.fillRect(12, -13, 66, 3);
+    /* red-dot sight */
+    ctx.fillStyle = "#23272e";
+    ctx.fillRect(22, -25, 30, 12);
+    ctx.fillStyle = "#0b0d0f";
+    ctx.fillRect(28, -22, 18, 7);
+    ctx.fillStyle = "#b8e63c";
+    ctx.beginPath();
+    ctx.arc(37, -18.5, 1.8, 0, Math.PI * 2);
+    ctx.fill();
+    /* short barrel + suppressor-style muzzle */
+    ctx.fillStyle = "#23272e";
+    ctx.fillRect(-124, -6, 134, 11);
+    ctx.fillStyle = "#14171c";
+    ctx.fillRect(-136, -8, 14, 15);
+    ctx.fillStyle = "#2b3038";
+    ctx.fillRect(-60, -9, 8, 3);
+    ctx.fillRect(-36, -9, 8, 3);
+    /* big angled mag (drops on reload) */
+    ctx.save();
+    ctx.translate(30, 12);
+    ctx.rotate(0.42 + rt * 0.5);
+    ctx.fillStyle = "#262b31";
+    ctx.fillRect(-8, rt * 46, 17, 32);
+    ctx.fillStyle = "#14171c";
+    ctx.fillRect(-8, 25 + rt * 46, 17, 6);
+    ctx.restore();
+    /* foregrip */
+    ctx.save();
+    ctx.translate(-46, 6);
+    ctx.rotate(-0.12);
+    ctx.fillStyle = "#1a1e23";
+    ctx.fillRect(-5, 0, 11, 22);
+    ctx.restore();
+    /* trigger grip */
+    ctx.save();
+    ctx.translate(72, 10);
+    ctx.rotate(-0.26);
+    ctx.fillStyle = "#1a1e23";
+    ctx.fillRect(-7, 0, 14, 28);
+    ctx.restore();
+    /* hands */
+    ctx.fillStyle = "#20262b";
+    ctx.beginPath();
+    ctx.arc(-42, 12, 11, 0, Math.PI * 2);
+    ctx.arc(56, 19, 10, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "rgba(255,255,255,0.06)";
+    ctx.fillRect(-60, -6, 138, 2);
+  }
+
+  private drawShotgunParts(ctx: CanvasRenderingContext2D, rt: number) {
+    /* wooden stock */
+    ctx.fillStyle = "#6e4a1e";
+    ctx.fillRect(86, -12, 44, 26);
+    ctx.fillStyle = "#4a3214";
+    ctx.fillRect(86, 6, 44, 8);
+    ctx.fillStyle = "#14171c";
+    ctx.fillRect(126, -14, 9, 30);
+    /* receiver */
+    ctx.fillStyle = "#24282e";
+    ctx.fillRect(4, -14, 84, 28);
+    ctx.fillStyle = "#0e1013";
+    ctx.fillRect(30, -8, 24, 8);
+    ctx.fillStyle = "rgba(255,159,28,0.8)";
+    ctx.fillRect(8, -14, 76, 3);
+    /* side saddle shells */
+    ctx.fillStyle = "#a33226";
+    ctx.fillRect(12, -5, 8, 15);
+    ctx.fillRect(24, -5, 8, 15);
+    ctx.fillStyle = "#d8a437";
+    ctx.fillRect(12, 7, 8, 4);
+    ctx.fillRect(24, 7, 8, 4);
+    /* barrel + tube */
+    ctx.fillStyle = "#2b3038";
+    ctx.fillRect(-200, -9, 204, 12);
+    ctx.fillStyle = "#1c2026";
+    ctx.fillRect(-184, 3, 188, 9);
+    ctx.fillStyle = "#14171c";
+    ctx.fillRect(-204, -10, 8, 14);
+    /* bead sight */
+    ctx.fillStyle = "#ffb02e";
+    ctx.beginPath();
+    ctx.arc(-196, -12, 2.4, 0, Math.PI * 2);
+    ctx.fill();
+    /* pump handle — slides back while reloading */
+    ctx.save();
+    ctx.translate(-96 + rt * 26, 0);
+    ctx.fillStyle = "#6e4a1e";
+    ctx.fillRect(0, -4, 42, 20);
+    ctx.fillStyle = "#4a3214";
+    ctx.fillRect(6, -1, 4, 14);
+    ctx.fillRect(16, -1, 4, 14);
+    ctx.fillRect(26, -1, 4, 14);
+    ctx.restore();
+    /* grip */
+    ctx.save();
+    ctx.translate(76, 12);
+    ctx.rotate(-0.3);
+    ctx.fillStyle = "#4a3214";
+    ctx.fillRect(-7, 0, 15, 26);
+    ctx.restore();
+    /* hands */
+    ctx.fillStyle = "#20262b";
+    ctx.beginPath();
+    ctx.arc(-66 + rt * 26, 8, 12, 0, Math.PI * 2);
+    ctx.arc(60, 20, 11, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "rgba(255,255,255,0.06)";
+    ctx.fillRect(-200, -9, 286, 2);
   }
 
   /* ---------------------------- minimap ---------------------------- */
