@@ -718,6 +718,9 @@ export class Game {
     }
   }
 
+  /* Gun is anchored bottom-right; its barrel is aimed along the exact line
+     from the anchor to the screen center, so the muzzle always sits on the
+     real line of fire (what you see is what you hit). */
   private gunPose() {
     const p = this.p;
     const s = this.H / 430;
@@ -725,10 +728,12 @@ export class Game {
     const def = WEAPONS[this.wIdx];
     const rt = p.reloading ? Math.sin(Math.PI * clamp(p.reloadT / def.reload, 0, 1)) : 0;
     const swap = Math.sin((1 - this.swapT) * Math.PI * 0.5) * 70;
-    /* idle breathing sway when standing still */
     const idle = moving > 0.4 ? 0 : 1;
     const breathX = Math.sin(this.now * 1.6) * 1.6 * idle;
     const breathY = Math.sin(this.now * 2.3) * 1.2 * idle;
+    const sprinting = this.keys.has("ShiftLeft") || this.keys.has("ShiftRight");
+
+    /* anchor (rear of the weapon) with all movement offsets */
     const gx = this.W * 0.60 + Math.sin(p.bobT) * 6 * moving + clamp(this.swayX, -26, 26) + breathX;
     const gy = this.H + 10 + Math.abs(Math.cos(p.bobT)) * 7 * moving
       + this.recoil * 15
@@ -737,12 +742,28 @@ export class Game {
       + rt * 85
       + swap
       + clamp(this.swayY, -18, 18) + breathY;
-    const sprinting = this.keys.has("ShiftLeft") || this.keys.has("ShiftRight");
-    const rot = 0.42 + this.recoil * 0.1 + this.crouchT * 0.05
+
+    /* aim the barrel from the anchor straight at the crosshair.
+       The gun models are drawn along local -X, so the canvas rotation is
+       the aim angle + PI; the muzzle direction is (rot - PI). */
+    const aimX = this.W / 2;
+    const aimY = this.H / 2 + this.pitch * 0.45;
+    const baseA = Math.atan2(aimY - gy, aimX - gx);
+    let rot = baseA + Math.PI;
+    rot += this.recoil * 0.05 + this.crouchT * 0.04
       + rt * 0.5
-      + clamp(this.swayX, -26, 26) * 0.004
-      + (sprinting && moving > 0.4 ? 0.1 : 0);
-    return { gx, gy, rot, s };
+      + (sprinting && moving > 0.4 ? 0.08 : 0);
+
+    /* barrel length so the muzzle lands just short of center */
+    const dist = Math.hypot(aimX - gx, aimY - gy);
+    const barrelLen = dist * (this.wIdx === 1 ? 0.76 : this.wIdx === 2 ? 0.8 : 0.82);
+    /* true muzzle-tip position in screen space (uses the tilted angle so
+       tracers, smoke and flash all come out of the drawn muzzle) */
+    const muzA = rot - Math.PI;
+    const tipX = gx + Math.cos(muzA) * barrelLen;
+    const tipY = gy + Math.sin(muzA) * barrelLen;
+
+    return { gx, gy, rot, s, tipX, tipY, barrelLen };
   }
 
   private moveFactor(): number {
@@ -767,16 +788,19 @@ export class Game {
     else sfx.shoot();
 
     const pose = this.gunPose();
+    /* eject casing from the ejection port, up and to the right */
+    const ejA = pose.rot - Math.PI; /* barrel direction */
+    const ejX = pose.gx + Math.cos(ejA) * 60 * pose.s;
+    const ejY = pose.gy + Math.sin(ejA) * 60 * pose.s - 14 * pose.s;
     this.parts.push({
-      x: pose.gx + Math.cos(pose.rot) * 40 * pose.s,
-      y: pose.gy + Math.sin(pose.rot) * 40 * pose.s - 20 * pose.s,
-      vx: 90 + Math.random() * 90, vy: -160 - Math.random() * 60,
+      x: ejX, y: ejY,
+      vx: 130 + Math.random() * 110, vy: -190 - Math.random() * 70,
       life: 0.75, maxLife: 0.75,
       size: def.sound === "shotgun" ? 3.4 : 2.5,
       color: def.sound === "shotgun" ? "#c23a2a" : "#d8a437",
-      grav: 620, add: false,
+      grav: 640, add: false,
       rot: Math.random() * 6.28,
-      vrot: (Math.random() > 0.5 ? 1 : -1) * (10 + Math.random() * 14),
+      vrot: (Math.random() > 0.5 ? 1 : -1) * (12 + Math.random() * 16),
       rect: true,
     });
 
@@ -792,11 +816,9 @@ export class Game {
     let anyHit = false;
     let anyHead = false;
 
-    /* muzzle screen position for tracers */
-    const tipX = pose.gx + Math.cos(pose.rot) * -200 * pose.s;
-    const tipY = pose.gy + Math.sin(pose.rot) * -200 * pose.s;
-    const mx0 = tipX * 0.3 + (this.W / 2) * 0.7;
-    const my0 = tipY * 0.3 + (this.H / 2) * 0.7;
+    /* true muzzle-tip position (on the line of fire) for tracers & smoke */
+    const mx0 = pose.tipX;
+    const my0 = pose.tipY;
     const eye = this.eyeH();
     const magPlane = Math.hypot(this.planeX, this.planeY) || 0.66;
 
@@ -1839,6 +1861,8 @@ export class Game {
   private drawGun(ctx: CanvasRenderingContext2D) {
     const pose = this.gunPose();
     const s = pose.s;
+    /* barrel length in local (pre-scale) units — the muzzle sits exactly here */
+    const bl = pose.barrelLen / s;
     ctx.save();
     ctx.translate(pose.gx, pose.gy);
     ctx.rotate(pose.rot);
@@ -1847,15 +1871,15 @@ export class Game {
     const def = WEAPONS[this.wIdx];
     const rt = this.p.reloading ? Math.sin(Math.PI * clamp(this.p.reloadT / def.reload, 0, 1)) : 0;
 
-    if (this.wIdx === 0) this.drawRifleParts(ctx, rt);
-    else if (this.wIdx === 1) this.drawSmgParts(ctx, rt);
-    else this.drawShotgunParts(ctx, rt);
+    if (this.wIdx === 0) this.drawRifleParts(ctx, rt, bl);
+    else if (this.wIdx === 1) this.drawSmgParts(ctx, rt, bl);
+    else this.drawShotgunParts(ctx, rt, bl);
 
-    /* muzzle flash */
+    /* muzzle flash at the true barrel tip */
     if (this.muzzleT > 0) {
       ctx.globalCompositeOperation = "lighter";
-      const mx = this.wIdx === 1 ? -138 : this.wIdx === 2 ? -204 : -206;
-      const my = -1;
+      const mx = -bl;
+      const my = this.wIdx === 2 ? -4 : -1;
       const r1 = (26 + Math.random() * 10) * def.flash;
       const fg = ctx.createRadialGradient(mx, my, 0, mx, my, r1);
       fg.addColorStop(0, "rgba(255,247,214,0.98)");
@@ -1913,189 +1937,348 @@ export class Game {
 
   /* ---------------------------- viewmodels ---------------------------- */
 
-  private drawRifleParts(ctx: CanvasRenderingContext2D, rt: number) {
-    /* stock */
-    ctx.fillStyle = "#171b20";
-    ctx.fillRect(84, -10, 46, 22);
-    ctx.fillStyle = "#0d0f12";
-    ctx.fillRect(124, -12, 8, 26);
-    /* receiver */
-    ctx.fillStyle = "#1c2026";
-    ctx.fillRect(8, -14, 78, 28);
-    ctx.fillStyle = "#0e1013";
-    ctx.fillRect(30, -8, 22, 8);
-    ctx.fillStyle = "rgba(255,176,46,0.85)";
-    ctx.fillRect(12, -3, 42, 3);
-    /* carry handle sight */
-    ctx.fillStyle = "#23272e";
-    ctx.fillRect(18, -26, 36, 12);
-    ctx.fillStyle = "#0b0d0f";
-    ctx.fillRect(30, -23, 10, 6);
-    /* handguard */
-    ctx.fillStyle = "#2b3038";
-    ctx.fillRect(-72, -11, 82, 22);
-    ctx.fillStyle = "#171a20";
-    ctx.fillRect(-62, -6, 14, 4);
-    ctx.fillRect(-40, -6, 14, 4);
-    ctx.fillRect(-18, -6, 14, 4);
-    /* barrel */
-    ctx.fillStyle = "#23272e";
-    ctx.fillRect(-190, -7, 120, 13);
-    ctx.fillStyle = "#14171c";
-    ctx.fillRect(-202, -10, 16, 18);
-    ctx.fillStyle = "#2b3038";
-    ctx.fillRect(-180, -21, 5, 14);
-    /* magazine (drops on reload) */
+  /* Realistic AR-style carbine. Muzzle lands exactly at -bl (the line of fire). */
+  private drawRifleParts(ctx: CanvasRenderingContext2D, rt: number, bl: number) {
+    const metal = (x: number, y: number, w: number, h: number, c1: string, c2: string) => {
+      const g = ctx.createLinearGradient(0, y, 0, y + h);
+      g.addColorStop(0, c1);
+      g.addColorStop(0.5, c2);
+      g.addColorStop(1, "#101318");
+      ctx.fillStyle = g;
+      ctx.fillRect(x, y, w, h);
+    };
+
+    /* ---------- stock (right end) ---------- */
+    metal(88, -9, 44, 22, "#2b3138", "#1e232a");
+    ctx.fillStyle = "#14181d";
+    ctx.fillRect(88, -9, 44, 4); /* cheek riser */
+    ctx.fillStyle = "#0b0d10";
+    ctx.fillRect(128, -11, 8, 27); /* rubber buttpad */
+    ctx.fillStyle = "#101318";
+    ctx.fillRect(88, 4, 40, 5); /* stock underside */
+
+    /* ---------- buffer tube ---------- */
+    metal(74, -5, 16, 12, "#333a42", "#242a31");
+
+    /* ---------- upper receiver ---------- */
+    metal(0, -15, 76, 17, "#3a424c", "#262c34");
+    /* picatinny rail teeth on top */
+    ctx.fillStyle = "#171b21";
+    for (let x = 2; x < 74; x += 7) ctx.fillRect(x, -17, 4, 3);
+    /* ejection port + brass deflector */
+    ctx.fillStyle = "#0e1114";
+    ctx.fillRect(34, -11, 22, 9);
+    ctx.fillStyle = "#8a6a24";
+    ctx.fillRect(37, -9, 8, 5);
+    ctx.fillStyle = "#3a424c";
+    ctx.fillRect(58, -12, 5, 11);
+    /* forward assist + charging handle */
+    ctx.fillStyle = "#1c2128";
+    ctx.beginPath(); ctx.arc(66, -6, 3, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#262c34";
+    ctx.fillRect(-2, -13, 8, 4);
+
+    /* ---------- red-dot optic ---------- */
+    ctx.fillStyle = "#1a1f26";
+    ctx.fillRect(20, -31, 34, 15);
+    ctx.fillStyle = "#0d1013";
+    ctx.fillRect(24, -28, 26, 9);
+    metal(18, -19, 38, 4, "#333a42", "#22282f"); /* mount */
     ctx.save();
-    ctx.translate(38, 12);
-    ctx.rotate(0.22 + rt * 0.5);
-    ctx.fillStyle = "#262b31";
-    ctx.fillRect(-9, rt * 46, 20, 34);
-    ctx.fillStyle = "#14171c";
-    ctx.fillRect(-9, 26 + rt * 46, 20, 6);
+    ctx.globalCompositeOperation = "lighter";
+    ctx.fillStyle = "rgba(255,60,46,0.95)";
+    ctx.beginPath(); ctx.arc(37, -23.5, 2.1, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "rgba(255,60,46,0.35)";
+    ctx.beginPath(); ctx.arc(37, -23.5, 4.6, 0, Math.PI * 2); ctx.fill();
     ctx.restore();
-    /* grip */
+
+    /* ---------- lower receiver ---------- */
+    metal(2, 2, 72, 14, "#2c333b", "#1e242b");
+    /* magwell flare */
+    ctx.fillStyle = "#20262d";
+    ctx.fillRect(20, 14, 30, 5);
+    /* trigger guard + trigger */
+    ctx.strokeStyle = "#171b21";
+    ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(48, 16); ctx.quadraticCurveTo(58, 26, 68, 16); ctx.stroke();
+    ctx.fillStyle = "#0e1114";
+    ctx.fillRect(56, 16, 3, 7);
+    /* selector switch + pins */
+    ctx.fillStyle = "#3a424c";
+    ctx.beginPath(); ctx.arc(66, 8, 2.6, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#14181d";
+    ctx.beginPath(); ctx.arc(8, 9, 2, 0, Math.PI * 2); ctx.arc(70, 9, 2, 0, Math.PI * 2); ctx.fill();
+
+    /* ---------- curved magazine (tilts out on reload) ---------- */
     ctx.save();
-    ctx.translate(78, 10);
-    ctx.rotate(-0.28);
-    ctx.fillStyle = "#1a1e23";
-    ctx.fillRect(-7, 0, 15, 30);
+    ctx.translate(34, 17);
+    ctx.rotate(0.16 + rt * 0.65);
+    metal(-9, rt * 46, 20, 36, "#31383f", "#232930");
+    ctx.fillStyle = "#171b21";
+    ctx.fillRect(-9, 8 + rt * 46, 20, 2);
+    ctx.fillRect(-9, 18 + rt * 46, 20, 2);
+    ctx.fillStyle = "#101318";
+    ctx.fillRect(-9, 30 + rt * 46, 20, 6); /* baseplate */
     ctx.restore();
-    /* hands */
-    ctx.fillStyle = "#20262b";
-    ctx.beginPath();
-    ctx.arc(-44, 9, 12, 0, Math.PI * 2);
-    ctx.arc(60, 20, 11, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = "rgba(255,255,255,0.06)";
-    ctx.fillRect(-72, -11, 158, 3);
+
+    /* ---------- pistol grip ---------- */
+    ctx.save();
+    ctx.translate(74, 15);
+    ctx.rotate(-0.24);
+    metal(-8, 0, 16, 32, "#2b3138", "#1c2128");
+    ctx.fillStyle = "#14181d";
+    ctx.fillRect(-8, 6, 16, 2);
+    ctx.fillRect(-8, 14, 16, 2);
+    ctx.restore();
+
+    /* ---------- free-float handguard ---------- */
+    const hgEnd = -70; /* handguard runs 6 .. hgEnd */
+    metal(hgEnd, -12, 6 - hgEnd, 22, "#333a42", "#232930");
+    ctx.fillStyle = "#171b21";
+    for (let x = hgEnd + 4; x < 0; x += 8) ctx.fillRect(x, -14, 5, 3); /* top rail */
+    /* M-LOK slots */
+    ctx.fillStyle = "#101318";
+    for (let x = hgEnd + 8; x < -6; x += 16) {
+      ctx.fillRect(x, -6, 10, 3);
+      ctx.fillRect(x, 3, 10, 3);
+    }
+    ctx.fillStyle = "#14181d";
+    ctx.fillRect(hgEnd, -12, 4, 22); /* end cap */
+
+    /* ---------- barrel + gas block + flash hider ---------- */
+    metal(-bl + 16, -5, bl - 16 - 70 + 6, 9, "#3d454f", "#262d35"); /* barrel */
+    ctx.fillStyle = "#2c333b";
+    ctx.fillRect(-bl + 46, -8, 8, 15); /* gas block */
+    ctx.fillRect(-bl + 48, -14, 3, 7); /* front sight post */
+    /* flash hider at the very tip */
+    metal(-bl, -7, 16, 13, "#3d454f", "#22282f");
+    ctx.fillStyle = "#0b0d10";
+    ctx.fillRect(-bl + 3, -7, 2, 13);
+    ctx.fillRect(-bl + 8, -7, 2, 13);
+
+    /* ---------- hands ---------- */
+    ctx.fillStyle = "#22282e";
+    ctx.beginPath(); ctx.arc(-38, 8, 12, 0, Math.PI * 2); ctx.fill(); /* support hand on handguard */
+    ctx.fillStyle = "#1a1f25";
+    ctx.fillRect(-46, 2, 16, 4); /* fingers wrap */
+    ctx.fillStyle = "#22282e";
+    ctx.beginPath(); ctx.arc(62, 22, 11, 0, Math.PI * 2); ctx.fill(); /* firing hand on grip */
+    ctx.fillStyle = "rgba(255,255,255,0.05)";
+    ctx.fillRect(hgEnd, -12, 6 - hgEnd, 3); /* top highlight */
   }
 
-  private drawSmgParts(ctx: CanvasRenderingContext2D, rt: number) {
-    /* wire stock */
+  /* Compact PDW. Muzzle lands exactly at -bl. */
+  private drawSmgParts(ctx: CanvasRenderingContext2D, rt: number, bl: number) {
+    const metal = (x: number, y: number, w: number, h: number, c1: string, c2: string) => {
+      const g = ctx.createLinearGradient(0, y, 0, y + h);
+      g.addColorStop(0, c1);
+      g.addColorStop(0.5, c2);
+      g.addColorStop(1, "#101318");
+      ctx.fillStyle = g;
+      ctx.fillRect(x, y, w, h);
+    };
+
+    /* ---------- folding wire stock ---------- */
     ctx.save();
-    ctx.translate(80, 0);
-    ctx.rotate(0.28);
-    ctx.fillStyle = "#171a20";
-    ctx.fillRect(0, -3, 56, 7);
-    ctx.fillRect(48, -3, 7, 22);
+    ctx.translate(78, 0);
+    ctx.rotate(0.24);
+    ctx.fillStyle = "#1c2128";
+    ctx.fillRect(0, -4, 52, 6);
+    ctx.fillRect(44, -4, 7, 24);
+    ctx.fillStyle = "#101318";
+    ctx.fillRect(0, 6, 52, 3);
     ctx.restore();
-    /* compact receiver */
-    ctx.fillStyle = "#1e2228";
-    ctx.fillRect(10, -13, 70, 26);
-    ctx.fillStyle = "#0e1013";
-    ctx.fillRect(24, -7, 20, 7);
-    ctx.fillStyle = "rgba(154,205,50,0.8)";
-    ctx.fillRect(12, -13, 66, 3);
-    /* red-dot sight */
-    ctx.fillStyle = "#23272e";
-    ctx.fillRect(22, -25, 30, 12);
-    ctx.fillStyle = "#0b0d0f";
-    ctx.fillRect(28, -22, 18, 7);
-    ctx.fillStyle = "#b8e63c";
-    ctx.beginPath();
-    ctx.arc(37, -18.5, 1.8, 0, Math.PI * 2);
-    ctx.fill();
-    /* short barrel + suppressor-style muzzle */
-    ctx.fillStyle = "#23272e";
-    ctx.fillRect(-124, -6, 134, 11);
-    ctx.fillStyle = "#14171c";
-    ctx.fillRect(-136, -8, 14, 15);
-    ctx.fillStyle = "#2b3038";
-    ctx.fillRect(-60, -9, 8, 3);
-    ctx.fillRect(-36, -9, 8, 3);
-    /* big angled mag (drops on reload) */
+
+    /* ---------- compact receiver ---------- */
+    metal(0, -14, 74, 26, "#38404a", "#242b32");
+    ctx.fillStyle = "#171b21";
+    for (let x = 2; x < 72; x += 7) ctx.fillRect(x, -16, 4, 3); /* top rail */
+    /* ejection port */
+    ctx.fillStyle = "#0e1114";
+    ctx.fillRect(26, -8, 18, 8);
+    ctx.fillStyle = "#8a6a24";
+    ctx.fillRect(29, -6, 6, 4);
+    /* charging handle (top, cocked back on reload) */
+    ctx.fillStyle = "#2c333b";
+    ctx.fillRect(8 + rt * 14, -20, 12, 5);
+    ctx.fillStyle = "#171b21";
+    ctx.fillRect(8, -19, 30, 3); /* handle slot */
+
+    /* ---------- compact red-dot ---------- */
+    ctx.fillStyle = "#1a1f26";
+    ctx.fillRect(34, -27, 24, 12);
+    ctx.fillStyle = "#0d1013";
+    ctx.fillRect(37, -24, 18, 7);
     ctx.save();
-    ctx.translate(30, 12);
-    ctx.rotate(0.42 + rt * 0.5);
-    ctx.fillStyle = "#262b31";
-    ctx.fillRect(-8, rt * 46, 17, 32);
-    ctx.fillStyle = "#14171c";
-    ctx.fillRect(-8, 25 + rt * 46, 17, 6);
+    ctx.globalCompositeOperation = "lighter";
+    ctx.fillStyle = "rgba(184,230,60,0.95)";
+    ctx.beginPath(); ctx.arc(46, -20.5, 1.8, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "rgba(184,230,60,0.3)";
+    ctx.beginPath(); ctx.arc(46, -20.5, 4, 0, Math.PI * 2); ctx.fill();
     ctx.restore();
-    /* foregrip */
+
+    /* ---------- lower + trigger ---------- */
+    metal(2, 12, 60, 10, "#2c333b", "#1e242b");
+    ctx.strokeStyle = "#171b21";
+    ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(36, 14); ctx.quadraticCurveTo(45, 23, 54, 14); ctx.stroke();
+    ctx.fillStyle = "#0e1114";
+    ctx.fillRect(43, 14, 3, 6);
+
+    /* ---------- angled stick mag (drops on reload) ---------- */
     ctx.save();
-    ctx.translate(-46, 6);
-    ctx.rotate(-0.12);
-    ctx.fillStyle = "#1a1e23";
-    ctx.fillRect(-5, 0, 11, 22);
+    ctx.translate(26, 14);
+    ctx.rotate(0.4 + rt * 0.6);
+    metal(-8, rt * 46, 17, 34, "#31383f", "#232930");
+    ctx.fillStyle = "#171b21";
+    ctx.fillRect(-8, 10 + rt * 46, 17, 2);
+    ctx.fillStyle = "#101318";
+    ctx.fillRect(-8, 28 + rt * 46, 17, 6);
     ctx.restore();
-    /* trigger grip */
+
+    /* ---------- grip ---------- */
     ctx.save();
-    ctx.translate(72, 10);
+    ctx.translate(62, 15);
     ctx.rotate(-0.26);
-    ctx.fillStyle = "#1a1e23";
-    ctx.fillRect(-7, 0, 14, 28);
+    metal(-7, 0, 15, 28, "#2b3138", "#1c2128");
     ctx.restore();
-    /* hands */
-    ctx.fillStyle = "#20262b";
-    ctx.beginPath();
-    ctx.arc(-42, 12, 11, 0, Math.PI * 2);
-    ctx.arc(56, 19, 10, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = "rgba(255,255,255,0.06)";
-    ctx.fillRect(-60, -6, 138, 2);
+
+    /* ---------- short barrel + vented handguard ---------- */
+    const hgEnd = -48;
+    metal(hgEnd, -10, 6 - hgEnd, 18, "#333a42", "#232930");
+    ctx.fillStyle = "#101318";
+    for (let x = hgEnd + 6; x < -4; x += 12) { /* cooling vents */
+      ctx.beginPath(); ctx.arc(x, -1, 3.4, 0, Math.PI * 2); ctx.fill();
+    }
+    metal(-bl + 12, -4, bl - 12 - 48 + 4, 8, "#3d454f", "#262d35"); /* barrel */
+    /* stubby compensator at the tip */
+    metal(-bl, -6, 12, 11, "#3d454f", "#22282f");
+    ctx.fillStyle = "#0b0d10";
+    ctx.fillRect(-bl + 3, -6, 2, 11);
+    ctx.fillRect(-bl + 7, -6, 2, 11);
+
+    /* ---------- vertical foregrip ---------- */
+    ctx.save();
+    ctx.translate(-34, 7);
+    ctx.rotate(-0.1);
+    metal(-5, 0, 11, 20, "#2b3138", "#1c2128");
+    ctx.restore();
+
+    /* ---------- hands ---------- */
+    ctx.fillStyle = "#22282e";
+    ctx.beginPath(); ctx.arc(-32, 14, 11, 0, Math.PI * 2); ctx.fill(); /* support hand */
+    ctx.fillStyle = "#22282e";
+    ctx.beginPath(); ctx.arc(52, 22, 10, 0, Math.PI * 2); ctx.fill(); /* firing hand */
+    ctx.fillStyle = "rgba(255,255,255,0.05)";
+    ctx.fillRect(hgEnd, -10, 6 - hgEnd, 3);
   }
 
-  private drawShotgunParts(ctx: CanvasRenderingContext2D, rt: number) {
-    /* wooden stock */
-    ctx.fillStyle = "#6e4a1e";
-    ctx.fillRect(86, -12, 44, 26);
-    ctx.fillStyle = "#4a3214";
-    ctx.fillRect(86, 6, 44, 8);
+  /* Pump-action combat shotgun. Muzzle lands exactly at -bl. */
+  private drawShotgunParts(ctx: CanvasRenderingContext2D, rt: number, bl: number) {
+    const metal = (x: number, y: number, w: number, h: number, c1: string, c2: string) => {
+      const g = ctx.createLinearGradient(0, y, 0, y + h);
+      g.addColorStop(0, c1);
+      g.addColorStop(0.5, c2);
+      g.addColorStop(1, "#101318");
+      ctx.fillStyle = g;
+      ctx.fillRect(x, y, w, h);
+    };
+    const wood = (x: number, y: number, w: number, h: number, c1: string, c2: string) => {
+      const g = ctx.createLinearGradient(0, y, 0, y + h);
+      g.addColorStop(0, c1);
+      g.addColorStop(1, c2);
+      ctx.fillStyle = g;
+      ctx.fillRect(x, y, w, h);
+    };
+
+    /* ---------- wooden stock with pistol-grip curve ---------- */
+    wood(84, -12, 48, 24, "#7a5322", "#4a3214");
+    ctx.fillStyle = "#5d3d18";
+    ctx.beginPath(); /* grip swell */
+    ctx.moveTo(84, 12); ctx.quadraticCurveTo(86, 34, 100, 38); ctx.lineTo(112, 30);
+    ctx.quadraticCurveTo(96, 26, 96, 12); ctx.closePath(); ctx.fill();
     ctx.fillStyle = "#14171c";
-    ctx.fillRect(126, -14, 9, 30);
-    /* receiver */
-    ctx.fillStyle = "#24282e";
-    ctx.fillRect(4, -14, 84, 28);
-    ctx.fillStyle = "#0e1013";
-    ctx.fillRect(30, -8, 24, 8);
-    ctx.fillStyle = "rgba(255,159,28,0.8)";
-    ctx.fillRect(8, -14, 76, 3);
-    /* side saddle shells */
+    ctx.fillRect(128, -14, 9, 28); /* buttpad */
+    ctx.strokeStyle = "rgba(60,38,14,0.5)";
+    ctx.lineWidth = 1.5; /* wood grain */
+    ctx.beginPath(); ctx.moveTo(88, -6); ctx.quadraticCurveTo(108, -4, 126, -6); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(88, 2); ctx.quadraticCurveTo(108, 4, 126, 2); ctx.stroke();
+
+    /* ---------- receiver ---------- */
+    metal(0, -14, 86, 26, "#3a424c", "#242b32");
+    ctx.fillStyle = "#0e1114";
+    ctx.fillRect(28, -9, 26, 10); /* ejection port */
     ctx.fillStyle = "#a33226";
-    ctx.fillRect(12, -5, 8, 15);
-    ctx.fillRect(24, -5, 8, 15);
+    ctx.fillRect(32, -7, 12, 6); /* exposed shell */
     ctx.fillStyle = "#d8a437";
-    ctx.fillRect(12, 7, 8, 4);
-    ctx.fillRect(24, 7, 8, 4);
-    /* barrel + tube */
-    ctx.fillStyle = "#2b3038";
-    ctx.fillRect(-200, -9, 204, 12);
-    ctx.fillStyle = "#1c2026";
-    ctx.fillRect(-184, 3, 188, 9);
-    ctx.fillStyle = "#14171c";
-    ctx.fillRect(-204, -10, 8, 14);
-    /* bead sight */
-    ctx.fillStyle = "#ffb02e";
-    ctx.beginPath();
-    ctx.arc(-196, -12, 2.4, 0, Math.PI * 2);
-    ctx.fill();
-    /* pump handle — slides back while reloading */
+    ctx.fillRect(42, -7, 3, 6);
+    /* side-saddle shell holder */
+    ctx.fillStyle = "#1c2128";
+    ctx.fillRect(4, -6, 20, 16);
+    ctx.fillStyle = "#a33226";
+    ctx.fillRect(7, -4, 6, 12);
+    ctx.fillRect(15, -4, 6, 12);
+    ctx.fillStyle = "#d8a437";
+    ctx.fillRect(7, 6, 6, 3);
+    ctx.fillRect(15, 6, 6, 3);
+    /* trigger guard */
+    ctx.strokeStyle = "#171b21";
+    ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(52, 12); ctx.quadraticCurveTo(62, 22, 72, 12); ctx.stroke();
+    ctx.fillStyle = "#0e1114";
+    ctx.fillRect(60, 12, 3, 7);
+    /* safety button */
+    ctx.fillStyle = "#b8e63c";
+    ctx.beginPath(); ctx.arc(78, 6, 2.2, 0, Math.PI * 2); ctx.fill();
+
+    /* ---------- barrel (top) + tube mag (bottom) ---------- */
+    metal(-bl + 10, -9, bl - 10 + 2, 8, "#3d454f", "#262d35"); /* barrel */
+    ctx.fillStyle = "rgba(255,255,255,0.08)";
+    ctx.fillRect(-bl + 10, -9, bl - 8, 2); /* barrel rib highlight */
+    metal(-bl + 34, 1, bl - 34 - 4, 8, "#333a42", "#22282f"); /* tube mag (shorter) */
+    ctx.fillStyle = "#2c333b";
+    ctx.fillRect(-bl + 30, -2, 6, 12); /* tube cap / barrel band */
+    /* choke at the very tip */
+    metal(-bl, -10, 10, 10, "#3d454f", "#22282f");
+    ctx.fillStyle = "#0b0d10";
+    ctx.fillRect(-bl, -10, 3, 10);
+    /* glowing front bead */
     ctx.save();
-    ctx.translate(-96 + rt * 26, 0);
-    ctx.fillStyle = "#6e4a1e";
-    ctx.fillRect(0, -4, 42, 20);
-    ctx.fillStyle = "#4a3214";
-    ctx.fillRect(6, -1, 4, 14);
-    ctx.fillRect(16, -1, 4, 14);
-    ctx.fillRect(26, -1, 4, 14);
+    ctx.globalCompositeOperation = "lighter";
+    ctx.fillStyle = "rgba(255,176,46,0.95)";
+    ctx.beginPath(); ctx.arc(-bl + 6, -12, 2.2, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "rgba(255,176,46,0.3)";
+    ctx.beginPath(); ctx.arc(-bl + 6, -12, 4.4, 0, Math.PI * 2); ctx.fill();
     ctx.restore();
-    /* grip */
+
+    /* ---------- pump forend — slides back while reloading ---------- */
+    const px = rt * 30;
     ctx.save();
-    ctx.translate(76, 12);
-    ctx.rotate(-0.3);
-    ctx.fillStyle = "#4a3214";
-    ctx.fillRect(-7, 0, 15, 26);
+    ctx.translate(px, 0);
+    wood(-110, -5, 46, 21, "#7a5322", "#4a3214");
+    ctx.fillStyle = "#5d3d18"; /* finger grooves */
+    ctx.fillRect(-102, -2, 4, 15);
+    ctx.fillRect(-92, -2, 4, 15);
+    ctx.fillRect(-82, -2, 4, 15);
+    ctx.fillRect(-72, -2, 4, 15);
+    ctx.strokeStyle = "rgba(60,38,14,0.5)";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(-106, 12); ctx.lineTo(-68, 12); ctx.stroke();
     ctx.restore();
-    /* hands */
-    ctx.fillStyle = "#20262b";
-    ctx.beginPath();
-    ctx.arc(-66 + rt * 26, 8, 12, 0, Math.PI * 2);
-    ctx.arc(60, 20, 11, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = "rgba(255,255,255,0.06)";
-    ctx.fillRect(-200, -9, 286, 2);
+    /* action bars linking pump to receiver */
+    ctx.fillStyle = "#2c333b";
+    ctx.fillRect(-66 + px, -3, 66, 3);
+    ctx.fillRect(-66 + px, 6, 66, 3);
+
+    /* ---------- hands ---------- */
+    ctx.fillStyle = "#22282e";
+    ctx.beginPath(); ctx.arc(-84 + px, 8, 12, 0, Math.PI * 2); ctx.fill(); /* pump hand */
+    ctx.fillStyle = "#1a1f25";
+    ctx.fillRect(-92 + px, 2, 16, 4);
+    ctx.fillStyle = "#22282e";
+    ctx.beginPath(); ctx.arc(70, 22, 11, 0, Math.PI * 2); ctx.fill(); /* grip hand */
+    ctx.fillStyle = "rgba(255,255,255,0.05)";
+    ctx.fillRect(0, -14, 86, 3);
   }
 
   /* ---------------------------- minimap ---------------------------- */
