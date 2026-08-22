@@ -127,6 +127,24 @@ export interface WeaponDef {
   spread: number; recoil: number; shake: number; kick: number;
   reload: number; range: number; flash: number;
   sound: "rifle" | "smg" | "shotgun";
+  /* ---------------- viewmodel pose (WeaponConfig) ----------------
+     Centralized so the barrel provably lies along the shoulder→aim line.
+     barrel     : local barrel length (the muzzle is drawn at -barrel).
+     anchorX/Y  : the shoulder/rear anchor as fractions of the screen. The
+                  recede direction is derived from (aim → anchor), so the
+                  barrel always points at the crosshair — never a magic angle.
+     muzzlePull : px the muzzle sits short of the aim point along the barrel
+                  line, so the gun doesn't cover the crosshair it aims down.
+     holdRot    : a *documented* base-rotation correction. All three weapons
+                  are authored with their forward axis along local -X, so this
+                  is 0 — kept only for assets whose native axis differs.      */
+  pose: {
+    barrel: number;
+    anchorX: number;
+    anchorY: number;
+    muzzlePull: number;
+    holdRot: number;
+  };
 }
 
 export const WEAPONS: WeaponDef[] = [
@@ -137,6 +155,7 @@ export const WEAPONS: WeaponDef[] = [
     dmgLo: 34, dmgHi: 48, pellets: 1,
     spread: 0.005, recoil: 1.25, shake: 2.4, kick: 4.2,
     reload: 1.6, range: 40, flash: 1, sound: "rifle",
+    pose: { barrel: 224, anchorX: 0.86, anchorY: 1.06, muzzlePull: 34, holdRot: 0 },
   },
   {
     /* full-auto PDW — hold the trigger and spray */
@@ -145,6 +164,7 @@ export const WEAPONS: WeaponDef[] = [
     dmgLo: 12, dmgHi: 19, pellets: 1,
     spread: 0.022, recoil: 0.5, shake: 1.2, kick: 1.5,
     reload: 1.2, range: 30, flash: 0.7, sound: "smg",
+    pose: { barrel: 158, anchorX: 0.80, anchorY: 1.02, muzzlePull: 26, holdRot: 0 },
   },
   {
     /* 8-pellet pump blast — shreds at close range */
@@ -153,6 +173,7 @@ export const WEAPONS: WeaponDef[] = [
     dmgLo: 11, dmgHi: 17, pellets: 8,
     spread: 0.085, recoil: 1.7, shake: 6, kick: 8,
     reload: 2.1, range: 10, flash: 1.7, sound: "shotgun",
+    pose: { barrel: 232, anchorX: 0.88, anchorY: 1.08, muzzlePull: 40, holdRot: 0 },
   },
 ];
 
@@ -213,6 +234,14 @@ export class Game {
   private swayX = 0;
   private swayY = 0;
   private landDip = 0;
+  /* recoil is a damped spring (position + velocity) so the kick is temporary
+     and always returns to the neutral aiming pose — never a permanent tilt */
+  private recoilV = 0;
+  /* dev-only aim debugger: press ` (backquote) to visualize aim ray, muzzle
+     point and last impact. Off by default, hidden in normal play. */
+  private debugAim = false;
+  private lastImpact: { x: number; y: number } | null = null;
+  private lastPose: { tipX: number; tipY: number; gx: number; gy: number } | null = null;
   /* juice */
   private corpses: Array<{ x: number; y: number; kind: EnemyKind; t: number; scale: number }> = [];
   private dmgDirs: Array<{ ang: number; t: number }> = [];
@@ -340,7 +369,8 @@ export class Game {
     p.rapidT = 0; p.bobT = 0;
     p.pz = 0; p.vz = 0; p.grounded = true;
     this.pitch = 0; this.recoilPitch = 0; this.shake = 0; this.dmgFlash = 0;
-    this.muzzleT = 0; this.recoil = 0; this.fireT = 0;
+    this.muzzleT = 0; this.recoil = 0; this.recoilV = 0; this.fireT = 0;
+    this.lastImpact = null;
     this.crouchT = 0; this.crouchLock = false;
     this.meleeT = 0; this.meleeCd = 0; this.fovKick = 0;
     this.enemies = []; this.pickups = []; this.parts = []; this.tracers = [];
@@ -455,6 +485,8 @@ export class Game {
         this.onEvent({ type: "pause" });
       }
     }
+    /* dev-only aim debugger — hidden in normal play */
+    if (e.code === "Backquote") this.debugAim = !this.debugAim;
     if (e.code === "KeyM") this.toggleMute();
   };
 
@@ -718,53 +750,85 @@ export class Game {
     }
   }
 
-  /* Aiming pose: the MUZZLE is pinned just under the crosshair (the shooter
-     looks down the sights onto the target) and the receiver trails back a
-     barrel-length toward the bottom-right at a natural, shallow hold angle —
-     like a person actually shouldering the weapon. */
+  /* Geometric aiming pose. The viewmodel and the firing system share one
+     authoritative aim direction — the camera's line of sight through the
+     screen center. The barrel is constructed to lie exactly on that line:
+
+       aim point (screen center + pitch)      ← where the raycast fires
+              ▲
+              │  barrel (drawn along local -X)
+              │
+       muzzle ┘  (sits muzzlePull px short of aim so it doesn't block it)
+        \
+         \  receiver trails back to the shoulder anchor (bottom-right)
+          \
+       shoulder anchor
+
+     Because rotation = atan2(shoulder − muzzle) and the muzzle sits on the
+     aim→shoulder segment, extending the barrel forward always passes through
+     the crosshair. No hardcoded "points up" angle is possible.             */
   private gunPose() {
     const p = this.p;
     const s = this.H / 430;
-    const moving = this.moveFactor();
     const def = WEAPONS[this.wIdx];
+    const cfg = def.pose;
+    const moving = this.moveFactor();
     const rt = p.reloading ? Math.sin(Math.PI * clamp(p.reloadT / def.reload, 0, 1)) : 0;
-    const swap = Math.sin((1 - this.swapT) * Math.PI * 0.5) * 70;
+    const swap = Math.sin((1 - this.swapT) * Math.PI * 0.5) * 60;
     const idle = moving > 0.4 ? 0 : 1;
-    const breathX = Math.sin(this.now * 1.6) * 1.6 * idle;
-    const breathY = Math.sin(this.now * 2.3) * 1.2 * idle;
     const sprinting = this.keys.has("ShiftLeft") || this.keys.has("ShiftRight");
+    const sprint = sprinting && moving > 0.4 ? 1 : 0;
 
-    /* local (pre-scale) barrel length of the current weapon */
-    const barrel = this.wIdx === 1 ? 152 : this.wIdx === 2 ? 232 : 224;
+    /* ---- movement / feel offsets (rigid translation of the whole gun) ---- */
+    const bobX = Math.sin(p.bobT) * 7 * moving;
+    const bobY = Math.abs(Math.cos(p.bobT)) * 8 * moving;
+    const breathX = Math.sin(this.now * 1.5) * 1.8 * idle;
+    const breathY = Math.cos(this.now * 2.1) * 1.4 * idle;
+    const swayX = clamp(this.swayX, -26, 26) * 0.5;
+    const swayY = clamp(this.swayY, -18, 18) * 0.5;
+    const crouchDrop = this.crouchT * 26 * s;
+    const jumpLift = p.pz * 55 * s;
+    const reloadDrop = rt * 90 + swap;
+    const sprintDrop = sprint * 14;
 
-    /* shallow, natural hold angle: barrel slopes up-and-left gently
-       (a shouldered rifle, not a steep diagonal) */
-    const rot = 0.44
-      + this.recoil * 0.06
-      + this.crouchT * 0.05
+    /* ---- aim point = screen center (where the hitscan fires) ----
+       The viewmodel is camera-attached: it stays fixed in screen space and
+       always points at the crosshair while the world/horizon moves with
+       pitch. A small pitch fraction adds feel without leaving the target. */
+    const aimX = this.W / 2 + bobX + swayX + breathX;
+    const aimY = this.H / 2 - this.pitch * 0.12 + bobY + swayY + breathY
+      + crouchDrop - jumpLift + reloadDrop * 0.3 + sprintDrop;
+
+    /* ---- shoulder anchor (bottom-right) defines the recede direction ---- */
+    const anchorX = this.W * cfg.anchorX + bobX + swayX * 1.5 + breathX;
+    const anchorY = this.H * cfg.anchorY + bobY + swayY * 1.5 + breathY
+      + crouchDrop - jumpLift + reloadDrop + sprintDrop;
+
+    /* barrel recede direction: from the aim point back toward the shoulder */
+    let dx = anchorX - aimX, dy = anchorY - aimY;
+    const dl = Math.hypot(dx, dy) || 1;
+    dx /= dl; dy /= dl;
+
+    /* muzzle sits muzzlePull px from the aim point along the barrel line */
+    const tipX = aimX + dx * cfg.muzzlePull;
+    const tipY = aimY + dy * cfg.muzzlePull;
+
+    /* fixed barrel length (no size pulsing); receiver = muzzle + dir*length */
+    const barrelLen = cfg.barrel * s;
+    /* recoil spring pushes the stock back along the barrel axis */
+    const recoilBack = this.recoil * 26;
+    const gx = tipX + dx * (barrelLen + recoilBack);
+    const gy = tipY + dy * (barrelLen + recoilBack);
+
+    /* rotation: local -X (barrel) points from shoulder to muzzle = at the aim */
+    const rot = Math.atan2(dy, dx) + cfg.holdRot
+      + this.recoil * 0.055
       + rt * 0.5
-      + (sprinting && moving > 0.4 ? 0.12 : 0)
+      + sprint * 0.12
       + clamp(this.swayX, -26, 26) * 0.003;
 
-    /* muzzle position — just under the crosshair, shifted by the pitch so
-       looking up/down raises/lowers the gun, plus all movement offsets */
-    const tipX = this.W / 2 + 4
-      + Math.sin(p.bobT) * 5 * moving
-      + clamp(this.swayX, -26, 26) * 0.55 + breathX;
-    const tipY = this.H / 2 + this.H * 0.075 + this.pitch * 0.45
-      + Math.abs(Math.cos(p.bobT)) * 6 * moving
-      + this.recoil * 13
-      + this.crouchT * 20 * s
-      + p.pz * 50 * s
-      + rt * 70
-      + swap
-      + clamp(this.swayY, -18, 18) * 0.55 + breathY;
-
-    /* receiver (local origin) sits one barrel-length behind the muzzle */
-    const gx = tipX + Math.cos(rot) * barrel * s;
-    const gy = tipY + Math.sin(rot) * barrel * s;
-
-    return { gx, gy, rot, s, tipX, tipY, barrelLen: barrel * s };
+    this.lastPose = { tipX, tipY, gx, gy };
+    return { gx, gy, rot, s, tipX, tipY, barrelLen: cfg.barrel };
   }
   private moveFactor(): number {
     const k = this.keys;
@@ -778,7 +842,8 @@ export class Game {
     const def = WEAPONS[this.wIdx];
     this.mags[this.wIdx]--;
     p.shots++;
-    this.recoil = def.recoil;
+    /* spring impulse — the kick peaks quickly and damps back to neutral */
+    this.recoilV += def.recoil * 9;
     this.muzzleT = 0.055;
     this.shake = Math.min(14, this.shake + def.shake);
     this.recoilPitch -= def.kick;
@@ -861,6 +926,7 @@ export class Game {
             head ? ["#ffe08a", "#c22f24", "#ff5b4d"] : ["#c22f24", "#8a1f1a", "#e05548"],
             150, 320, false);
           this.tracers.push({ x1: mx0, y1: my0, x2: pr.sx, y2: hitY, t: def.sound === "smg" ? 0.045 : 0.065 });
+          if (pel === 0) this.lastImpact = { x: pr.sx, y: hitY };
         }
         if (best.hp <= 0) {
           this.killEnemy(best);
@@ -881,6 +947,7 @@ export class Game {
             this.burst(wpr.sx, iy, 5, ["#ffd28a", "#ffb02e", "#fff2c8"], 90, 0, true);
           }
           this.tracers.push({ x1: mx0, y1: my0, x2: wpr.sx, y2: iy, t: def.sound === "smg" ? 0.04 : 0.06 });
+          if (pel === 0) this.lastImpact = { x: wpr.sx, y: iy };
         } else if (pel === 0) {
           const rel = normAngle(ang - p.a);
           const col = clamp(Math.round(((Math.tan(rel) / magPlane + 1) / 2) * this.W), 0, this.W - 1);
@@ -1111,7 +1178,12 @@ export class Game {
     if (this.shake < 0.05) this.shake = 0;
     this.dmgFlash = Math.max(0, this.dmgFlash - dt * 2.2);
     this.muzzleT = Math.max(0, this.muzzleT - dt);
-    this.recoil = Math.max(0, this.recoil - dt * 7);
+    /* damped spring recoil: kicks back/up, then smoothly returns to neutral
+       (temporary — the weapon never stays tilted upward after firing) */
+    this.recoilV += (-90 * this.recoil - 12 * this.recoilV) * dt;
+    this.recoil += this.recoilV * dt;
+    if (this.recoil < 0) { this.recoil = 0; this.recoilV = Math.max(0, this.recoilV); }
+    this.recoil = Math.min(this.recoil, 1.25);
     this.recoilPitch = Math.min(0, this.recoilPitch + dt * 26);
     this.hitMark.t = Math.max(0, this.hitMark.t - dt);
     this.meleeT = Math.max(0, this.meleeT - dt);
@@ -1811,6 +1883,45 @@ export class Game {
 
     /* crosshair + hit marker */
     if (!this.dead) this.drawCrosshair(ctx, W, H);
+
+    /* dev-only aim debugger (toggle with ` ) — verifies that the camera aim
+       ray, the visual barrel line and the actual impact all coincide. */
+    if (this.debugAim && this.lastPose) {
+      const lp = this.lastPose;
+      const aimX = W / 2, aimY = H / 2 + this.pitch;
+      ctx.save();
+      ctx.lineWidth = 1.5;
+      /* barrel / line-of-fire: muzzle -> aim point */
+      ctx.strokeStyle = "rgba(80,220,255,0.9)";
+      ctx.setLineDash([6, 5]);
+      ctx.beginPath();
+      ctx.moveTo(lp.tipX, lp.tipY);
+      ctx.lineTo(aimX, aimY);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      /* muzzle point */
+      ctx.fillStyle = "#50dcff";
+      ctx.beginPath(); ctx.arc(lp.tipX, lp.tipY, 4, 0, Math.PI * 2); ctx.fill();
+      /* aim point */
+      ctx.strokeStyle = "#ffd24a";
+      ctx.beginPath(); ctx.arc(aimX, aimY, 6, 0, Math.PI * 2); ctx.stroke();
+      /* last impact */
+      if (this.lastImpact) {
+        ctx.strokeStyle = "#ff5b4d";
+        ctx.beginPath();
+        ctx.moveTo(this.lastImpact.x - 6, this.lastImpact.y - 6);
+        ctx.lineTo(this.lastImpact.x + 6, this.lastImpact.y + 6);
+        ctx.moveTo(this.lastImpact.x + 6, this.lastImpact.y - 6);
+        ctx.lineTo(this.lastImpact.x - 6, this.lastImpact.y + 6);
+        ctx.stroke();
+      }
+      ctx.font = "700 11px Rajdhani, sans-serif";
+      ctx.fillStyle = "#50dcff";
+      ctx.fillText("AIM DEBUG — ` to close", 10, 16);
+      ctx.fillStyle = "#9fe8ff";
+      ctx.fillText(`muzzle(${Math.round(lp.tipX)},${Math.round(lp.tipY)})  aim(${Math.round(aimX)},${Math.round(aimY)})`, 10, 30);
+      ctx.restore();
+    }
   }
 
   private drawCrosshair(ctx: CanvasRenderingContext2D, W: number, H: number) {
@@ -1861,8 +1972,9 @@ export class Game {
   private drawGun(ctx: CanvasRenderingContext2D) {
     const pose = this.gunPose();
     const s = pose.s;
-    /* barrel length in local (pre-scale) units — the muzzle sits exactly here */
-    const bl = pose.barrelLen / s;
+    /* gunPose returns barrelLen already in local (pre-scale) units — the
+       muzzle is drawn at -bl, then the scale(s) maps it onto the aim line */
+    const bl = pose.barrelLen;
     ctx.save();
     ctx.translate(pose.gx, pose.gy);
     ctx.rotate(pose.rot);
@@ -1875,26 +1987,33 @@ export class Game {
     else if (this.wIdx === 1) this.drawSmgParts(ctx, rt, bl);
     else this.drawShotgunParts(ctx, rt, bl);
 
-    /* muzzle flash at the true barrel tip */
+    /* muzzle flash at the true barrel tip, elongated along the barrel (-X,
+       i.e. into the screen toward the aim point) — not a symmetric blob */
     if (this.muzzleT > 0) {
       ctx.globalCompositeOperation = "lighter";
       const mx = -bl;
       const my = this.wIdx === 2 ? -4 : -1;
-      const r1 = (26 + Math.random() * 10) * def.flash;
-      const fg = ctx.createRadialGradient(mx, my, 0, mx, my, r1);
-      fg.addColorStop(0, "rgba(255,247,214,0.98)");
-      fg.addColorStop(0.35, "rgba(255,176,46,0.8)");
+      const r1 = (22 + Math.random() * 9) * def.flash;
+      /* hot core */
+      const fg = ctx.createRadialGradient(mx, my, 0, mx, my, r1 * 0.9);
+      fg.addColorStop(0, "rgba(255,250,225,0.98)");
+      fg.addColorStop(0.4, "rgba(255,190,70,0.85)");
       fg.addColorStop(1, "rgba(255,120,20,0)");
       ctx.fillStyle = fg;
-      ctx.fillRect(mx - r1, my - r1, r1 * 2, r1 * 2);
-      ctx.fillStyle = "rgba(255,230,160,0.9)";
       ctx.beginPath();
-      const spikes = this.wIdx === 2 ? 6 : 4;
+      ctx.arc(mx, my, r1 * 0.9, 0, Math.PI * 2);
+      ctx.fill();
+      /* directional cone + star spikes biased forward along -X */
+      ctx.fillStyle = "rgba(255,225,150,0.9)";
+      ctx.beginPath();
+      const spikes = this.wIdx === 2 ? 6 : 5;
       for (let i = 0; i < spikes; i++) {
-        const a = (i * Math.PI * 2) / spikes + Math.random() * 0.3;
+        /* center the spike fan around PI (the -X / forward direction) */
+        const a = Math.PI + (i - (spikes - 1) / 2) * 0.5 + (Math.random() - 0.5) * 0.2;
+        const len = r1 * (i === Math.floor(spikes / 2) ? 1.9 : 1.1) * (0.8 + Math.random() * 0.4);
         ctx.moveTo(mx, my);
-        ctx.lineTo(mx + Math.cos(a) * r1 * 1.4, my + Math.sin(a) * r1 * 1.4);
-        ctx.lineTo(mx + Math.cos(a + 0.3) * r1 * 0.5, my + Math.sin(a + 0.3) * r1 * 0.5);
+        ctx.lineTo(mx + Math.cos(a) * len, my + Math.sin(a) * len);
+        ctx.lineTo(mx + Math.cos(a + 0.22) * len * 0.4, my + Math.sin(a + 0.22) * len * 0.4);
       }
       ctx.fill();
       ctx.globalCompositeOperation = "source-over";
@@ -1936,6 +2055,38 @@ export class Game {
   }
 
   /* ---------------------------- viewmodels ---------------------------- */
+
+  /* Perspective-foreshortened metal part: a trapezoid narrower at the muzzle
+     (far) end than the receiver (near) end, shaded with a vertical gradient.
+     This is what makes the flat barrel read as a 3D tube receding *into* the
+     screen toward the aim point instead of a plank lying across the screen. */
+  private trapMetal(
+    ctx: CanvasRenderingContext2D,
+    xFar: number, xNear: number, cy: number,
+    hFar: number, hNear: number, c1: string, c2: string
+  ) {
+    const g = ctx.createLinearGradient(0, cy - hNear, 0, cy + hNear);
+    g.addColorStop(0, c1);
+    g.addColorStop(0.45, c2);
+    g.addColorStop(1, "#0d1015");
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.moveTo(xFar, cy - hFar);
+    ctx.lineTo(xNear, cy - hNear);
+    ctx.lineTo(xNear, cy + hNear);
+    ctx.lineTo(xFar, cy + hFar);
+    ctx.closePath();
+    ctx.fill();
+    /* top edge highlight = depth cue */
+    ctx.fillStyle = "rgba(255,255,255,0.07)";
+    ctx.beginPath();
+    ctx.moveTo(xFar, cy - hFar);
+    ctx.lineTo(xNear, cy - hNear);
+    ctx.lineTo(xNear, cy - hNear + 2);
+    ctx.lineTo(xFar, cy - hFar + 2);
+    ctx.closePath();
+    ctx.fill();
+  }
 
   /* Realistic AR-style carbine. Muzzle lands exactly at -bl (the line of fire). */
   private drawRifleParts(ctx: CanvasRenderingContext2D, rt: number, bl: number) {
@@ -2031,30 +2182,30 @@ export class Game {
     ctx.fillRect(-8, 14, 16, 2);
     ctx.restore();
 
-    /* ---------- free-float handguard ---------- */
+    /* ---------- free-float handguard (tapered for depth) ---------- */
     const hgEnd = -70; /* handguard runs 6 .. hgEnd */
-    metal(hgEnd, -12, 6 - hgEnd, 22, "#333a42", "#232930");
+    this.trapMetal(ctx, hgEnd, 6, -1, 8, 11, "#38404a", "#242b32");
     ctx.fillStyle = "#171b21";
-    for (let x = hgEnd + 4; x < 0; x += 8) ctx.fillRect(x, -14, 5, 3); /* top rail */
+    for (let x = hgEnd + 4; x < 0; x += 8) ctx.fillRect(x, -12.5, 5, 3); /* top rail */
     /* M-LOK slots */
     ctx.fillStyle = "#101318";
     for (let x = hgEnd + 8; x < -6; x += 16) {
-      ctx.fillRect(x, -6, 10, 3);
-      ctx.fillRect(x, 3, 10, 3);
+      ctx.fillRect(x, -5, 10, 2.6);
+      ctx.fillRect(x, 3, 10, 2.6);
     }
     ctx.fillStyle = "#14181d";
-    ctx.fillRect(hgEnd, -12, 4, 22); /* end cap */
+    ctx.fillRect(hgEnd, -9, 4, 17); /* end cap */
 
-    /* ---------- barrel + gas block + flash hider ---------- */
-    metal(-bl + 16, -5, bl - 16 - 70 + 6, 9, "#3d454f", "#262d35"); /* barrel */
+    /* ---------- barrel + gas block + flash hider (tapered tube) ---------- */
+    this.trapMetal(ctx, -bl + 16, hgEnd, -0.5, 2.6, 4.6, "#454e59", "#28303a"); /* barrel */
     ctx.fillStyle = "#2c333b";
-    ctx.fillRect(-bl + 46, -8, 8, 15); /* gas block */
-    ctx.fillRect(-bl + 48, -14, 3, 7); /* front sight post */
-    /* flash hider at the very tip */
-    metal(-bl, -7, 16, 13, "#3d454f", "#22282f");
+    ctx.fillRect(-bl + 46, -8, 8, 13); /* gas block */
+    ctx.fillRect(-bl + 48, -13, 3, 6); /* front sight post */
+    /* flash hider at the very tip — the clearly identifiable muzzle */
+    this.trapMetal(ctx, -bl, -bl + 16, -0.5, 5, 6.4, "#454e59", "#22282f");
     ctx.fillStyle = "#0b0d10";
-    ctx.fillRect(-bl + 3, -7, 2, 13);
-    ctx.fillRect(-bl + 8, -7, 2, 13);
+    ctx.fillRect(-bl + 3, -6.5, 2, 12);
+    ctx.fillRect(-bl + 8, -6.5, 2, 12);
 
     /* ---------- hands ---------- */
     ctx.fillStyle = "#22282e";
@@ -2143,19 +2294,19 @@ export class Game {
     metal(-7, 0, 15, 28, "#2b3138", "#1c2128");
     ctx.restore();
 
-    /* ---------- short barrel + vented handguard ---------- */
+    /* ---------- short barrel + vented handguard (tapered for depth) ---------- */
     const hgEnd = -48;
-    metal(hgEnd, -10, 6 - hgEnd, 18, "#333a42", "#232930");
+    this.trapMetal(ctx, hgEnd, 6, -1, 6.5, 9, "#38404a", "#242b32");
     ctx.fillStyle = "#101318";
     for (let x = hgEnd + 6; x < -4; x += 12) { /* cooling vents */
-      ctx.beginPath(); ctx.arc(x, -1, 3.4, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(x, -1, 3, 0, Math.PI * 2); ctx.fill();
     }
-    metal(-bl + 12, -4, bl - 12 - 48 + 4, 8, "#3d454f", "#262d35"); /* barrel */
-    /* stubby compensator at the tip */
-    metal(-bl, -6, 12, 11, "#3d454f", "#22282f");
+    this.trapMetal(ctx, -bl + 12, hgEnd, -0.5, 2.4, 4, "#454e59", "#28303a"); /* barrel */
+    /* stubby compensator at the tip — the clearly identifiable muzzle */
+    this.trapMetal(ctx, -bl, -bl + 12, -0.5, 4.4, 5.6, "#454e59", "#22282f");
     ctx.fillStyle = "#0b0d10";
-    ctx.fillRect(-bl + 3, -6, 2, 11);
-    ctx.fillRect(-bl + 7, -6, 2, 11);
+    ctx.fillRect(-bl + 3, -5.5, 2, 10);
+    ctx.fillRect(-bl + 7, -5.5, 2, 10);
 
     /* ---------- vertical foregrip ---------- */
     ctx.save();
@@ -2231,11 +2382,9 @@ export class Game {
     ctx.fillStyle = "#b8e63c";
     ctx.beginPath(); ctx.arc(78, 6, 2.2, 0, Math.PI * 2); ctx.fill();
 
-    /* ---------- barrel (top) + tube mag (bottom) ---------- */
-    metal(-bl + 10, -9, bl - 10 + 2, 8, "#3d454f", "#262d35"); /* barrel */
-    ctx.fillStyle = "rgba(255,255,255,0.08)";
-    ctx.fillRect(-bl + 10, -9, bl - 8, 2); /* barrel rib highlight */
-    metal(-bl + 34, 1, bl - 34 - 4, 8, "#333a42", "#22282f"); /* tube mag (shorter) */
+    /* ---------- barrel (top) + tube mag (bottom), tapered for depth ---------- */
+    this.trapMetal(ctx, -bl + 10, 2, -5, 2.8, 4.2, "#454e59", "#28303a"); /* barrel */
+    this.trapMetal(ctx, -bl + 34, -4, 5, 3, 4, "#38404a", "#22282f"); /* tube mag (shorter) */
     ctx.fillStyle = "#2c333b";
     ctx.fillRect(-bl + 30, -2, 6, 12); /* tube cap / barrel band */
     /* choke at the very tip */
