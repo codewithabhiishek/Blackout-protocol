@@ -131,6 +131,21 @@ class Sfx {
   step() {
     this.noise(0.045, 0.08, 680, 0.8);
   }
+  jump() {
+    this.noise(0.12, 0.09, 900, 1);
+    this.tone(170, 320, 0.13, "sine", 0.09);
+  }
+  land() {
+    this.tone(95, 44, 0.14, "sine", 0.3);
+    this.noise(0.1, 0.16, 420, 0.7);
+  }
+  melee() {
+    this.noise(0.13, 0.3, 1900, 2.2, 0, "bandpass");
+  }
+  meleeHit() {
+    this.tone(210, 58, 0.16, "square", 0.24);
+    this.noise(0.12, 0.2, 700, 0.8);
+  }
   ui() {
     this.tone(840, 620, 0.07, "square", 0.1);
   }

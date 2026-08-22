@@ -7,7 +7,7 @@ import { sfx } from "./game/audio";
 const HUD0: HudData = {
   hp: 100, mag: 30, magSize: 30, score: 0, kills: 0, wave: 1,
   enemies: 0, mult: 1, rapid: 0, reloading: false,
-  weapon: "PHANTOM MK-IV", muted: false,
+  weapon: "PHANTOM MK-IV", muted: false, crouched: false,
 };
 
 interface FeedItem { id: number; text: string; color: string }
@@ -305,6 +305,11 @@ export default function App() {
               <div className="chamfer-sm bg-black/45 px-5 py-1.5 text-[13px] font-semibold tracking-[0.34em] text-ghost">
                 HOSTILES&nbsp;&nbsp;<span className="font-bold text-blood">{String(hud.enemies).padStart(2, "0")}</span>
               </div>
+              {hud.crouched && (
+                <div className="chamfer-sm border border-acid/40 bg-black/55 px-3 py-0.5 text-[10px] font-bold tracking-[0.28em] text-acid">
+                  CROUCHED — STEADY AIM
+                </div>
+              )}
             </div>
           )}
 
@@ -470,8 +475,11 @@ export default function App() {
                     ))}
                   </div>
                   <Ctrl k="W A S D" label="MOVE" />
-                  <Ctrl k="MOUSE" label="LOOK — JUST MOVE CURSOR" />
+                  <Ctrl k="MOUSE" label="AIM / LOOK" />
                   <Ctrl k="LMB / RMB" label="FIRE (HOLD)" />
+                  <Ctrl k="SPACE" label="JUMP" />
+                  <Ctrl k="C / CTRL" label="CROUCH (TOGGLE)" />
+                  <Ctrl k="F" label="KNIFE MELEE" />
                   <Ctrl k="R" label="RELOAD" />
                   <Ctrl k="SHIFT" label="SPRINT" />
                   <Ctrl k="P / ESC" label="PAUSE" />

@@ -25,6 +25,7 @@ export interface HudData {
   mult: number;
   rapid: number;
   reloading: boolean;
+  crouched: boolean;
   weapon: string;
   muted: boolean;
 }
@@ -158,6 +159,7 @@ export class Game {
     mag: 30, reloading: false, reloadT: 0,
     chain: 0, chainT: 0, score: 0, kills: 0, shots: 0, hits: 0,
     rapidT: 0, bobT: 0, lastStep: 0,
+    pz: 0, vz: 0, grounded: true,
   };
   private pitch = 0;
   private recoilPitch = 0;
@@ -167,6 +169,11 @@ export class Game {
   private recoil = 0;
   private hitMark = { t: 0, kill: false };
   private fireT = 0;
+  private crouchT = 0;
+  private crouchLock = false;
+  private meleeT = 0;
+  private meleeCd = 0;
+  private fovKick = 0;
 
   private enemies: Enemy[] = [];
   private pickups: Pickup[] = [];
@@ -261,8 +268,11 @@ export class Game {
     p.hp = 100; p.mag = 30; p.reloading = false; p.reloadT = 0;
     p.chain = 0; p.chainT = 0; p.score = 0; p.kills = 0; p.shots = 0; p.hits = 0;
     p.rapidT = 0; p.bobT = 0;
+    p.pz = 0; p.vz = 0; p.grounded = true;
     this.pitch = 0; this.recoilPitch = 0; this.shake = 0; this.dmgFlash = 0;
     this.muzzleT = 0; this.recoil = 0; this.fireT = 0;
+    this.crouchT = 0; this.crouchLock = false;
+    this.meleeT = 0; this.meleeCd = 0; this.fovKick = 0;
     this.enemies = []; this.pickups = []; this.parts = []; this.tracers = [];
     this.wave = 0; this.waveActive = false; this.waveDelay = 2.0;
     this.dead = false; this.deathT = 0; this.overSent = false;
@@ -284,25 +294,23 @@ export class Game {
   }
 
   requestLock() {
-    /* rate-limited: sandboxed environments may reject pointer lock */
     const now = performance.now();
-    if (now - this.lastLockTry < 900) return;
+    if (now - this.lastLockTry < 1200) return;
     this.lastLockTry = now;
     try {
       const r = this.canvas.requestPointerLock() as unknown as Promise<void> | undefined;
       if (r && typeof r.catch === "function") r.catch(() => undefined);
     } catch {
-      /* pointer lock unavailable */
+      /* pointer lock unavailable — relative mouse-look fallback takes over */
     }
   }
 
   resumeGame() {
-    if (this.mode === "play" && this.paused && !this.dead) {
-      this.paused = false;
-      this.last = performance.now();
-      this.onEvent({ type: "resume" });
-    }
-    this.requestLock(); /* best effort — game is fully playable without it */
+    if (this.mode !== "play" || !this.paused || this.dead) return;
+    this.paused = false;
+    this.last = performance.now();
+    this.onEvent({ type: "resume" });
+    this.requestLock();
   }
 
   quitToMenu() {
@@ -354,7 +362,12 @@ export class Game {
   private onKeyDown = (e: KeyboardEvent) => {
     if (["Space", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.code)) e.preventDefault();
     this.keys.add(e.code);
-    if (e.code === "KeyR" && this.mode === "play" && !this.paused && !this.dead) this.startReload();
+    if (this.mode === "play" && !this.paused && !this.dead) {
+      if (e.code === "KeyR") this.startReload();
+      if (e.code === "Space") this.tryJump();
+      if (e.code === "KeyC") this.crouchLock = !this.crouchLock;
+      if (e.code === "KeyF" || e.code === "KeyV") this.tryMelee();
+    }
     if (e.code === "KeyP" && this.mode === "play" && !this.dead) {
       if (this.paused) this.resumeGame();
       else if (this.locked) document.exitPointerLock();
@@ -395,6 +408,7 @@ export class Game {
   private onMouseDown = (e: MouseEvent) => {
     if (e.button === 0 || e.button === 2) {
       e.preventDefault();
+      window.focus?.();
       this.prevMouse.x = e.clientX;
       this.prevMouse.y = e.clientY;
       this.mouseDown = true;
@@ -406,14 +420,18 @@ export class Game {
   };
 
   private onPlc = () => {
-    this.locked = document.pointerLockElement === this.canvas;
-    if (this.locked) {
+    const nowLocked = document.pointerLockElement === this.canvas;
+    const wasLocked = this.locked;
+    this.locked = nowLocked;
+    if (nowLocked) {
       if (this.mode === "play" && this.paused && !this.dead) {
         this.paused = false;
         this.last = performance.now();
         this.onEvent({ type: "resume" });
       }
-    } else if (this.mode === "play" && !this.paused && !this.dead && !this.overSent) {
+    } else if (wasLocked && this.mode === "play" && !this.paused && !this.dead && !this.overSent) {
+      /* only auto-pause when the user really had capture and released it (Esc) —
+         environments where pointer lock never engages must never freeze the game */
       this.paused = true;
       this.onEvent({ type: "pause" });
     }
@@ -479,10 +497,15 @@ export class Game {
   }
 
   private updateDir() {
+    const mag = 0.66 + this.fovKick * 0.13 - this.crouchT * 0.03;
     this.dirX = Math.cos(this.p.a);
     this.dirY = Math.sin(this.p.a);
-    this.planeX = -Math.sin(this.p.a) * 0.66;
-    this.planeY = Math.cos(this.p.a) * 0.66;
+    this.planeX = -Math.sin(this.p.a) * mag;
+    this.planeY = Math.cos(this.p.a) * mag;
+  }
+
+  private eyeH(): number {
+    return 0.5 + this.p.pz - 0.22 * this.crouchT;
   }
 
   private mult(): number {
@@ -501,6 +524,7 @@ export class Game {
       mult: this.mult(),
       rapid: Math.max(0, this.p.rapidT),
       reloading: this.p.reloading,
+      crouched: this.crouchT > 0.5,
       weapon: "PHANTOM MK-IV",
       muted: sfx.muted,
     });
@@ -516,6 +540,52 @@ export class Game {
     sfx.reload();
   }
 
+  private tryJump() {
+    if (this.p.grounded) {
+      this.p.vz = 2.5;
+      this.p.grounded = false;
+      sfx.jump();
+    }
+  }
+
+  private tryMelee() {
+    if (this.meleeCd > 0) return;
+    this.meleeT = 0.26;
+    this.meleeCd = 0.45;
+    sfx.melee();
+    const p = this.p;
+    let best: Enemy | null = null;
+    let bestD = 1.7;
+    for (const e of this.enemies) {
+      const dx = e.x - p.x, dy = e.y - p.y;
+      const d = Math.hypot(dx, dy);
+      if (d < bestD) {
+        const ang = Math.abs(normAngle(Math.atan2(dy, dx) - p.a));
+        if (ang < 0.85) { best = e; bestD = d; }
+      }
+    }
+    if (best) {
+      best.hp -= 75;
+      best.flash = 0.12;
+      const dx = best.x - p.x, dy = best.y - p.y;
+      const d = Math.max(0.001, Math.hypot(dx, dy));
+      const kx = (dx / d) * 0.55, ky = (dy / d) * 0.55;
+      if (!this.collides(best.x + kx, best.y, 0.3)) best.x += kx;
+      if (!this.collides(best.x, best.y + ky, 0.3)) best.y += ky;
+      this.hitMark = { t: 0.18, kill: false };
+      this.shake = Math.min(10, this.shake + 2);
+      sfx.meleeHit();
+      const pr = this.project(best.x, best.y);
+      if (pr) {
+        const ey = this.eyeH();
+        const bottom = this.horizon() + ey * (this.H / pr.ty);
+        const hgt = (this.H / pr.ty) * 0.86 * best.scale;
+        this.burst(pr.sx, bottom - hgt * 0.5, 12, ["#c22f24", "#8a1f1a", "#e05548"], 190, 330, false);
+      }
+      if (best.hp <= 0) this.killEnemy(best);
+    }
+  }
+
   private gunPose() {
     const p = this.p;
     const s = this.H / 430;
@@ -523,14 +593,14 @@ export class Game {
     const gx = this.W * 0.60 + Math.sin(p.bobT) * 6 * moving;
     const gy = this.H + 10 + Math.abs(Math.cos(p.bobT)) * 7 * moving
       + this.recoil * 15
+      + this.crouchT * 24 * s
+      + p.pz * 55 * s
       + (p.reloading ? Math.sin(Math.PI * clamp(p.reloadT / 1.5, 0, 1)) * 85 : 0);
     const sprinting = this.keys.has("ShiftLeft") || this.keys.has("ShiftRight");
-    const rot = 0.42 + this.recoil * 0.1
+    const rot = 0.42 + this.recoil * 0.1 + this.crouchT * 0.05
       + (p.reloading ? Math.sin(Math.PI * clamp(p.reloadT / 1.5, 0, 1)) * 0.5 : 0)
       + (sprinting && moving > 0.4 ? 0.1 : 0);
-    const tipX = gx + Math.cos(rot) * -200 * s;
-    const tipY = gy + Math.sin(rot) * -200 * s;
-    return { gx, gy, rot, s, tipX, tipY };
+    return { gx, gy, rot, s };
   }
 
   private moveFactor(): number {
@@ -560,7 +630,11 @@ export class Game {
     });
 
     const sprinting = this.keys.has("ShiftLeft") || this.keys.has("ShiftRight");
-    const spread = 0.011 + this.moveFactor() * 0.011 + (sprinting ? 0.018 : 0) + this.recoil * 0.006;
+    const airborne = this.p.grounded ? 0 : 0.02;
+    const spread = Math.max(
+      0.005,
+      0.011 + this.moveFactor() * 0.011 + (sprinting ? 0.018 : 0) + this.recoil * 0.006 + airborne - this.crouchT * 0.007
+    );
     const ang = p.a + (Math.random() - 0.5) * 2 * spread;
     const dx = Math.cos(ang), dy = Math.sin(ang);
     const wallDist = this.castGrid(p.x, p.y, dx, dy, 40);
@@ -587,8 +661,9 @@ export class Game {
       sfx.hit();
       const pr = this.project(best.x, best.y);
       if (pr) {
+        const eye = this.eyeH();
         const hgt = (this.H / pr.ty) * 0.86 * best.scale;
-        const bottom = this.horizon() + (this.H / pr.ty) / 2;
+        const bottom = this.horizon() + eye * (this.H / pr.ty);
         this.burst(pr.sx, bottom - hgt * (0.35 + Math.random() * 0.35), 8, ["#c22f24", "#8a1f1a", "#e05548"], 150, 320, false);
       }
       if (best.hp <= 0) this.killEnemy(best);
@@ -634,8 +709,9 @@ export class Game {
     });
     const pr = this.project(e.x, e.y);
     if (pr) {
+      const eye = this.eyeH();
       const hgt = (this.H / pr.ty) * 0.86 * e.scale;
-      const bottom = this.horizon() + (this.H / pr.ty) / 2;
+      const bottom = this.horizon() + eye * (this.H / pr.ty);
       this.burst(pr.sx, bottom - hgt * 0.5, 26, ["#c22f24", "#8a1f1a", "#e05548", "#ffb02e"], 230, 340, false);
     }
     if (Math.random() < 0.3) {
@@ -670,17 +746,19 @@ export class Game {
     sfx.eshoot();
     const pr = this.project(e.x, e.y);
     if (pr) {
+      const eye = this.eyeH();
       const hgt = (this.H / pr.ty) * 0.86 * e.scale;
-      const bottom = this.horizon() + (this.H / pr.ty) / 2;
+      const bottom = this.horizon() + eye * (this.H / pr.ty);
       this.tracers.push({
-        x1: pr.sx - (this.H / pr.ty) * 0.86 * e.scale * 0.3,
+        x1: pr.sx - hgt * 0.3,
         y1: bottom - hgt * 0.55,
         x2: this.W / 2 + (Math.random() - 0.5) * 110,
         y2: this.horizon() + (Math.random() - 0.5) * 70,
         t: 0.12,
       });
     }
-    if (Math.random() < chance) this.damagePlayer(dmg);
+    /* crouching makes you a harder target */
+    if (Math.random() < chance * (1 - 0.35 * this.crouchT)) this.damagePlayer(dmg);
   }
 
   /* ---------------------------- waves ---------------------------- */
@@ -758,6 +836,8 @@ export class Game {
     this.recoil = Math.max(0, this.recoil - dt * 7);
     this.recoilPitch = Math.min(0, this.recoilPitch + dt * 26);
     this.hitMark.t = Math.max(0, this.hitMark.t - dt);
+    this.meleeT = Math.max(0, this.meleeT - dt);
+    this.meleeCd = Math.max(0, this.meleeCd - dt);
     if (p.chainT > 0) {
       p.chainT -= dt;
       if (p.chainT <= 0) p.chain = 0;
@@ -785,17 +865,21 @@ export class Game {
 
     this.updateDir();
 
-    /* player movement */
+    /* crouch state */
     const k = this.keys;
+    const ctrlHeld = k.has("ControlLeft") || k.has("ControlRight");
+    const crouchTarget = this.crouchLock || ctrlHeld ? 1 : 0;
+    this.crouchT += (crouchTarget - this.crouchT) * Math.min(1, dt * 12);
+    if (crouchTarget === 1 && this.crouchT > 0.99) this.crouchT = 1;
+    if (crouchTarget === 0 && this.crouchT < 0.01) this.crouchT = 0;
+
+    /* player movement */
     const f = (k.has("KeyW") || k.has("ArrowUp") ? 1 : 0) - (k.has("KeyS") || k.has("ArrowDown") ? 1 : 0);
     const r = (k.has("KeyD") || k.has("ArrowRight") ? 1 : 0) - (k.has("KeyA") || k.has("ArrowLeft") ? 1 : 0);
-    const sprinting = (k.has("ShiftLeft") || k.has("ShiftRight")) && f > 0;
-    const speed = sprinting ? 4.5 : 2.9;
-    let mx = this.dirX * f - Math.sin(this.p.a) * -r;
-    let my = this.dirY * f + Math.cos(this.p.a) * -r;
-    /* strafe right vector is (-sin a, cos a) rotated? right = (cos(a+PI/2), sin(a+PI/2)) = (-sin, cos) */
-    mx = this.dirX * f + -Math.sin(this.p.a) * r;
-    my = this.dirY * f + Math.cos(this.p.a) * r;
+    const sprinting = (k.has("ShiftLeft") || k.has("ShiftRight")) && f > 0 && this.crouchT < 0.4;
+    const speed = (sprinting ? 4.5 : 2.9) * (1 - 0.45 * this.crouchT);
+    let mx = this.dirX * f + -Math.sin(this.p.a) * r;
+    let my = this.dirY * f + Math.cos(this.p.a) * r;
     const len = Math.hypot(mx, my);
     if (len > 0.01) {
       mx = (mx / len) * speed * dt;
@@ -805,13 +889,35 @@ export class Game {
       if (!this.collides(p.x, p.y + my, rad)) p.y += my;
       p.x = clamp(p.x, 1.3, MW - 1.3);
       p.y = clamp(p.y, 1.3, MH - 1.3);
-      p.bobT += dt * speed * 1.75;
-      const step = Math.floor(p.bobT / Math.PI);
-      if (step !== p.lastStep) {
-        p.lastStep = step;
-        sfx.step();
+      if (p.grounded) {
+        p.bobT += dt * speed * 1.75;
+        const step = Math.floor(p.bobT / Math.PI);
+        if (step !== p.lastStep) {
+          p.lastStep = step;
+          sfx.step();
+        }
       }
     }
+
+    /* sprint FOV kick */
+    const fovTarget = sprinting && len > 0.01 ? 1 : 0;
+    this.fovKick += (fovTarget - this.fovKick) * Math.min(1, dt * 7);
+
+    /* jump / gravity */
+    p.vz -= 10.5 * dt;
+    p.pz += p.vz * dt;
+    if (p.pz <= 0) {
+      if (!p.grounded) {
+        this.shake = Math.min(10, this.shake + 1.6);
+        sfx.land();
+      }
+      p.pz = 0;
+      p.vz = 0;
+      p.grounded = true;
+    } else {
+      p.grounded = false;
+    }
+
     /* enemies push player */
     for (const e of this.enemies) {
       const dx = p.x - e.x, dy = p.y - e.y;
@@ -884,7 +990,7 @@ export class Game {
         if (dist < 0.95 && e.cd <= 0 && e.los) {
           e.cd = 0.9;
           e.shootT = 0.12;
-          this.damagePlayer(9 + this.wave);
+          this.damagePlayer((9 + this.wave) * (1 - 0.3 * this.crouchT));
         }
       } else {
         if (!e.los) { vx = nx * e.speed; vy = ny * e.speed; }
@@ -1005,6 +1111,7 @@ export class Game {
 
     this.updateDir();
     const horizon = this.horizon();
+    const ey = this.eyeH();
     const shx = (Math.random() - 0.5) * this.shake;
     const shy = (Math.random() - 0.5) * this.shake;
 
@@ -1012,17 +1119,23 @@ export class Game {
     ctx.translate(shx, shy);
 
     /* ceiling */
-    let g = ctx.createLinearGradient(0, -40, 0, Math.max(1, horizon));
+    const farD = 13;
+    const ceilY = Math.max(1, horizon - (1 - ey) * (H / farD));
+    const floorY = Math.min(H - 1, horizon + ey * (H / farD));
+    let g = ctx.createLinearGradient(0, -40, 0, Math.max(1, ceilY));
     g.addColorStop(0, "#04060a");
     g.addColorStop(1, "#0b130e");
     ctx.fillStyle = g;
-    ctx.fillRect(-20, -40, W + 40, Math.max(1, horizon) + 40);
+    ctx.fillRect(-20, -40, W + 40, Math.max(1, ceilY) + 40);
+    /* far band (infinity, eaten by fog) */
+    ctx.fillStyle = "#0a0f0c";
+    ctx.fillRect(-20, ceilY, W + 40, Math.max(0, floorY - ceilY));
     /* floor */
-    g = ctx.createLinearGradient(0, horizon, 0, H + 40);
+    g = ctx.createLinearGradient(0, Math.max(0, floorY - 24), 0, H + 40);
     g.addColorStop(0, "#0d130e");
     g.addColorStop(1, "#20291d");
     ctx.fillStyle = g;
-    ctx.fillRect(-20, horizon, W + 40, H - horizon + 60);
+    ctx.fillRect(-20, floorY, W + 40, H - floorY + 60);
     /* horizon haze */
     ctx.fillStyle = "rgba(255,176,46,0.05)";
     ctx.fillRect(-20, horizon - 1, W + 40, 2);
@@ -1062,7 +1175,7 @@ export class Game {
       wallX -= Math.floor(wallX);
       let texX = Math.floor(wallX * 64);
       if ((side === 0 && rayX > 0) || (side === 1 && rayY < 0)) texX = 63 - texX;
-      const top = horizon - lineH / 2;
+      const top = horizon - (1 - ey) * lineH;
       ctx.drawImage(this.textures[cell] ?? this.textures[0], texX, 0, 1, 64, x, top, 1, lineH);
       const fog = Math.min(0.94, perp / 16 + (side === 1 ? 0.13 : 0));
       if (fog > 0.03) {
@@ -1079,7 +1192,7 @@ export class Game {
       const sz = clamp((H / pr.ty) * 0.012 * du.z, 0.6, 3.5);
       const a = 0.05 + 0.09 * (1 - pr.ty / 15);
       ctx.fillStyle = `rgba(190,225,190,${a.toFixed(3)})`;
-      const dy = horizon + (H / pr.ty) / 2 - (H / pr.ty) * du.z;
+      const dy = horizon + ey * (H / pr.ty) - (H / pr.ty) * du.z;
       ctx.fillRect(pr.sx, dy, sz, sz);
     }
     ctx.globalCompositeOperation = "source-over";
@@ -1109,7 +1222,7 @@ export class Game {
         const img = e.flash > 0 ? sprites.hit : sprites.walk[Math.floor(e.animT * 5) % 2];
         const hgt = (H / ty) * 0.86 * e.scale;
         const wdt = hgt * (SW / SH);
-        const bottom = horizon + (H / ty) / 2;
+        const bottom = horizon + ey * (H / ty);
         const startX = pr.sx - wdt / 2;
         const c0 = Math.max(0, Math.floor(startX));
         const c1 = Math.min(W - 1, Math.ceil(startX + wdt));
@@ -1158,7 +1271,8 @@ export class Game {
         if (!pr) continue;
         const img = this.pickupSprites[pk.kind];
         const size = (H / ty) * 0.3;
-        const bottom = horizon + (H / ty) / 2 - Math.abs(Math.sin(pk.t * 3)) * size * 0.28 - size * 0.06;
+        const floorPos = horizon + ey * (H / ty);
+        const bottom = floorPos - Math.abs(Math.sin(pk.t * 3)) * size * 0.28 - size * 0.06;
         const startX = pr.sx - size / 2;
         const c0 = Math.max(0, Math.floor(startX));
         const c1 = Math.min(W - 1, Math.ceil(startX + size));
@@ -1166,13 +1280,12 @@ export class Game {
         /* glow pad */
         ctx.globalCompositeOperation = "lighter";
         const glowC = pk.kind === "medkit" ? "rgba(125,255,138,0.14)" : "rgba(255,176,46,0.14)";
-        const gy2 = horizon + (H / ty) / 2;
         const gr2 = size * 0.8;
-        const gg = ctx.createRadialGradient(pr.sx, gy2, 0, pr.sx, gy2, gr2);
+        const gg = ctx.createRadialGradient(pr.sx, floorPos, 0, pr.sx, floorPos, gr2);
         gg.addColorStop(0, glowC);
         gg.addColorStop(1, "rgba(0,0,0,0)");
         ctx.fillStyle = gg;
-        ctx.fillRect(pr.sx - gr2, gy2 - gr2 * 0.4, gr2 * 2, gr2 * 0.8);
+        ctx.fillRect(pr.sx - gr2, floorPos - gr2 * 0.4, gr2 * 2, gr2 * 0.8);
         ctx.globalCompositeOperation = "source-over";
         for (let col = c0; col <= c1; col++) {
           if (this.zbuf[col] > ty + 0.05) {
@@ -1246,17 +1359,18 @@ export class Game {
   private drawCrosshair(ctx: CanvasRenderingContext2D, W: number, H: number) {
     const cx = W / 2, cy = H / 2;
     const sprinting = this.keys.has("ShiftLeft") || this.keys.has("ShiftRight");
-    const gap = 8 + this.moveFactor() * 5 + this.recoil * 11 + (sprinting ? 5 : 0);
-    ctx.strokeStyle = "rgba(0,0,0,0.7)";
-    ctx.lineWidth = 3.4;
-    this.crossLines(ctx, cx, cy, gap, 10);
+    const gap = 7 + this.moveFactor() * 5 + this.recoil * 11 + (sprinting ? 5 : 0)
+      - this.crouchT * 3 + (this.p.grounded ? 0 : 7);
+    ctx.strokeStyle = "rgba(0,0,0,0.65)";
+    ctx.lineWidth = 3;
+    this.crossLines(ctx, cx, cy, gap, 8);
     ctx.stroke();
-    ctx.strokeStyle = "rgba(240,255,240,0.95)";
-    ctx.lineWidth = 1.6;
-    this.crossLines(ctx, cx, cy, gap, 10);
+    ctx.strokeStyle = "rgba(240,255,240,0.92)";
+    ctx.lineWidth = 1.4;
+    this.crossLines(ctx, cx, cy, gap, 8);
     ctx.stroke();
-    ctx.fillStyle = "rgba(255,176,46,0.95)";
-    ctx.fillRect(cx - 1.2, cy - 1.2, 2.4, 2.4);
+    ctx.fillStyle = "rgba(255,200,80,0.95)";
+    ctx.fillRect(cx - 1, cy - 1, 2, 2);
 
     if (this.hitMark.t > 0) {
       const a = clamp(this.hitMark.t / (this.hitMark.kill ? 0.2 : 0.16), 0, 1);
@@ -1376,6 +1490,39 @@ export class Game {
       ctx.globalCompositeOperation = "source-over";
     }
     ctx.restore();
+
+    /* combat knife slash (screen space) */
+    if (this.meleeT > 0) {
+      const t = 1 - this.meleeT / 0.26;
+      ctx.save();
+      ctx.globalCompositeOperation = "lighter";
+      const cx = this.W * 0.5, cy = this.H * 0.66;
+      const rad = this.H * 0.44;
+      const a0 = -2.5 + t * 2.0;
+      const sweepA = 0.5;
+      ctx.strokeStyle = `rgba(220,240,255,${(0.75 * (1 - t * 0.5)).toFixed(3)})`;
+      ctx.lineWidth = 3 + (1 - t) * 4;
+      ctx.beginPath();
+      ctx.arc(cx, cy, rad, a0, a0 + sweepA);
+      ctx.stroke();
+      ctx.strokeStyle = `rgba(150,200,255,${(0.3 * (1 - t)).toFixed(3)})`;
+      ctx.lineWidth = 13;
+      ctx.beginPath();
+      ctx.arc(cx, cy, rad * 0.92, a0 - 0.12, a0 + sweepA);
+      ctx.stroke();
+      const ba = a0 + sweepA;
+      const bx = cx + Math.cos(ba) * rad, by = cy + Math.sin(ba) * rad;
+      ctx.fillStyle = "#dfe9f2";
+      ctx.translate(bx, by);
+      ctx.rotate(ba + Math.PI / 2 + 0.5);
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.lineTo(7, -36);
+      ctx.lineTo(-5, -32);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
   }
 
   /* ---------------------------- minimap ---------------------------- */
