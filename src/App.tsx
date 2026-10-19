@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Game, type HudData, type GameEvent, type OverStats } from "./game/engine";
 import { sfx } from "./game/audio";
-import { Maximize, Minimize, Volume2, VolumeX, Shield, MapPin } from "lucide-react";
+import { Maximize, Minimize, Volume2, VolumeX, Shield, MapPin, Sparkles } from "lucide-react";
+
 
 /* ------------------------------------------------------------------ */
 
@@ -530,6 +531,16 @@ export default function App() {
               <CrosshairIcon className="h-4 w-4 text-brass" />
               RAYCAST TACTICAL ARENA&nbsp;&nbsp;·&nbsp;&nbsp;BUILD 2.7.0&nbsp;&nbsp;·&nbsp;&nbsp;ARMOR & MULTI-ARENA SYSTEM
               <div className="ml-auto flex items-center gap-3">
+                <a
+                  href="https://abhiishek.is-a.dev/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="pointer-events-auto chamfer-sm border border-[#00d4ff]/40 bg-panel/90 px-3 py-1.5 text-[11px] font-bold tracking-[0.2em] text-[#00d4ff] hover:bg-[#00d4ff] hover:text-black flex items-center gap-1.5 transition-all cursor-pointer"
+                  title="Operative Dossier: Abhishek (abhiishek.is-a.dev) ↗"
+                >
+                  <Sparkles className="h-3.5 w-3.5" />
+                  <span>OPERATIVE: ABHISHEK ↗</span>
+                </a>
                 <button
                   onClick={toggleFullscreen}
                   className="pointer-events-auto chamfer-sm border border-line bg-panel/90 px-3.5 py-1.5 text-[11px] font-bold tracking-[0.2em] text-white hover:border-brass hover:text-brass flex items-center gap-2 transition-colors cursor-pointer"
@@ -542,6 +553,7 @@ export default function App() {
                   LINK ESTABLISHED
                 </span>
               </div>
+
             </div>
 
             {/* main row */}
@@ -680,9 +692,23 @@ export default function App() {
                 ))}
               </div>
             </div>
+
+            {/* author footer */}
+            <div className="anim-rise anim-rise-4 mt-3 text-center text-[10px] font-mono tracking-[0.25em] text-ghost/60">
+              TACTICAL ENGINE ENGINEERED BY{" "}
+              <a
+                href="https://abhiishek.is-a.dev/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-[#00d4ff] hover:underline font-bold transition-colors"
+              >
+                ABHISHEK ↗
+              </a>
+            </div>
           </div>
         </div>
       )}
+
 
       {/* ============================ PAUSE ============================ */}
       {screen === "paused" && (
@@ -769,9 +795,22 @@ export default function App() {
                 MAIN MENU
               </button>
             </div>
+
+            <div className="anim-rise anim-rise-3 mt-4 text-center text-[10px] font-mono tracking-[0.25em] text-ghost/60">
+              BLACKOUT PROTOCOL &bull; DESIGNED BY{" "}
+              <a
+                href="https://abhiishek.is-a.dev/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-brass hover:underline font-bold transition-colors"
+              >
+                ABHISHEK ↗
+              </a>
+            </div>
           </div>
         </div>
       )}
     </div>
   );
 }
+

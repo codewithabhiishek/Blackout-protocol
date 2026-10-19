@@ -118,8 +118,39 @@ Select your combat theater directly from the Main Menu:
    npm run build
    ```
 
+## 🧪 Testing & Quality Assurance
+
+Blackout Protocol contains an automated test suite executed via Node's native test runner (`node --test`), verifying ballistic armor absorption formulas, armor break penetration, fatal damage thresholds, headshot critical multipliers, score multiplier combos, weapon specifications, arena integrity, and haptic engine safety.
+
+```bash
+# Run unit tests (9 tests)
+npm test
+
+# Typecheck TypeScript
+npm run typecheck
+
+# Production build check
+npm run build
+```
+
+---
+
+## 🛡️ Security & Engineering Standards
+
+- **0 Dependencies Flaws**: 100% clean `npm audit` with 0 CVE vulnerabilities across production and development dependencies.
+- **Client-Side Data Isolation**: Combat records and high scores stay strictly localized in `localStorage` without tracking or telemetry leaks.
+- **Mobile Tactile Haptics**: Native vibration engine (`triggerHaptic`) providing tactile feedback on weapon fire, damage taken, armor breakage, and menu navigation.
+- **Lightweight Zero-Asset Architecture**: 100% procedural Web Audio sound synthesis and Canvas 2D raycasting without bloated external binary assets.
+
+---
+
+## 👨‍💻 Author & Creator
+
+Designed & engineered by [**Abhishek**](https://abhiishek.is-a.dev/) — explore more projects, games, and experiments at [abhiishek.is-a.dev](https://abhiishek.is-a.dev/).
+
 ---
 
 ## 📜 License
 
 MIT License &copy; 2026 Blackout Protocol Team.
+

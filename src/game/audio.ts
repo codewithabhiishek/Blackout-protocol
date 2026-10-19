@@ -1,6 +1,24 @@
 /* Procedural WebAudio sound engine — no assets, everything synthesized. */
 
+/**
+ * Safe tactile mobile haptic vibration feedback
+ */
+export function triggerHaptic(duration: number | number[] = 15): void {
+  if (
+    typeof window !== "undefined" &&
+    typeof navigator !== "undefined" &&
+    typeof navigator.vibrate === "function"
+  ) {
+    try {
+      navigator.vibrate(duration);
+    } catch {
+      /* ignore vibration errors */
+    }
+  }
+}
+
 class Sfx {
+
   private ac: AudioContext | null = null;
   private master: GainNode | null = null;
   private noiseBuf: AudioBuffer | null = null;
@@ -89,6 +107,7 @@ class Sfx {
   }
 
   shoot() {
+    triggerHaptic(18);
     this.noise(0.13, 0.55, 1500, 0.7);
     this.noise(0.05, 0.28, 4200, 1, 0, "highpass");
     this.tone(150, 48, 0.12, "square", 0.32);
@@ -101,10 +120,12 @@ class Sfx {
     this.tone(320, 190, 0.06, "square", 0.2);
   }
   kill() {
+    triggerHaptic(22);
     this.tone(230, 38, 0.28, "sawtooth", 0.28);
     this.noise(0.22, 0.26, 900, 0.8);
   }
   hurt() {
+    triggerHaptic([35, 20, 35]);
     this.tone(105, 48, 0.22, "sine", 0.42);
     this.noise(0.15, 0.2, 500, 0.7);
   }
@@ -113,17 +134,21 @@ class Sfx {
     this.noise(0.05, 0.24, 2000, 1, 0.14, "highpass");
   }
   reloadDone() {
+    triggerHaptic(14);
     this.noise(0.06, 0.3, 3000, 1, 0, "highpass");
     this.tone(680, 940, 0.07, "square", 0.12, 0.02);
   }
   empty() {
+    triggerHaptic(8);
     this.tone(1200, 880, 0.05, "square", 0.14);
   }
   pickup() {
+    triggerHaptic(15);
     this.tone(620, 930, 0.11, "sine", 0.24);
     this.tone(930, 1240, 0.1, "sine", 0.18, 0.07);
   }
   wave() {
+    triggerHaptic([25, 40, 50]);
     this.tone(68, 140, 0.55, "sawtooth", 0.26);
     this.tone(71, 143, 0.55, "sawtooth", 0.18);
     this.noise(0.45, 0.1, 380, 0.8);
@@ -132,16 +157,19 @@ class Sfx {
     this.noise(0.045, 0.08, 680, 0.8);
   }
   shootSmg() {
+    triggerHaptic(12);
     this.noise(0.065, 0.42, 1900, 0.7);
     this.noise(0.04, 0.2, 4800, 1, 0, "highpass");
     this.tone(220, 75, 0.07, "square", 0.2);
   }
   shootShotgun() {
+    triggerHaptic(30);
     this.noise(0.32, 0.6, 620, 0.6);
     this.noise(0.09, 0.3, 2800, 1, 0, "highpass");
     this.tone(105, 26, 0.3, "square", 0.42);
   }
   swap() {
+    triggerHaptic(10);
     this.noise(0.04, 0.22, 2600, 1, 0, "highpass");
     this.noise(0.04, 0.22, 2100, 1, 0.09, "highpass");
   }
@@ -150,6 +178,7 @@ class Sfx {
     this.tone(170, 320, 0.13, "sine", 0.09);
   }
   land() {
+    triggerHaptic(15);
     this.tone(95, 44, 0.14, "sine", 0.3);
     this.noise(0.1, 0.16, 420, 0.7);
   }
@@ -157,32 +186,40 @@ class Sfx {
     this.noise(0.13, 0.3, 1900, 2.2, 0, "bandpass");
   }
   meleeHit() {
+    triggerHaptic(25);
     this.tone(210, 58, 0.16, "square", 0.24);
     this.noise(0.12, 0.2, 700, 0.8);
   }
   headshot() {
+    triggerHaptic(35);
     this.tone(1150, 1750, 0.09, "sine", 0.2);
     this.tone(580, 880, 0.07, "square", 0.08, 0.02);
   }
   ui() {
+    triggerHaptic(8);
     this.tone(840, 620, 0.07, "square", 0.1);
   }
   over() {
+    triggerHaptic([50, 40, 80]);
     this.tone(300, 58, 1.1, "sawtooth", 0.3);
     this.tone(200, 40, 1.2, "square", 0.18, 0.12);
   }
   armorHit() {
+    triggerHaptic(20);
     this.tone(1450, 680, 0.08, "sine", 0.22);
     this.noise(0.06, 0.25, 3200, 1.5, 0, "highpass");
   }
   armorBreak() {
+    triggerHaptic([40, 20, 60]);
     this.tone(480, 110, 0.25, "sawtooth", 0.35);
     this.noise(0.2, 0.4, 1800, 1.2, 0, "bandpass");
   }
   armorPickup() {
+    triggerHaptic(15);
     this.tone(520, 880, 0.09, "sine", 0.2);
     this.tone(880, 1320, 0.12, "sine", 0.22, 0.05);
   }
+
 
   startAmbient() {
     const ac = this.ensure();
